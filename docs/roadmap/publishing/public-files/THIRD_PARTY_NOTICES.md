@@ -616,6 +616,64 @@ chosen because they can actually be shipped.
 - This file documents third-party components only. The project's own code remains
   under GPL-3.0-or-later with the Section 7 additional terms in [`LICENSE`](LICENSE).
 
+## Moon surface (shipped in `assets/earth/moon/`)
+
+| File | Source | Licence |
+|---|---|---|
+| `moon_albedo.pmoon` | NASA Lunar Reconnaissance Orbiter, Wide Angle Camera global mosaic (LRO_WAC_Mosaic_Global_303ppd_v02, served by NASA Moon Trek, trek.nasa.gov), level 3 of the tile pyramid: 4096 x 2048 | Public domain |
+
+Converted (stitched, poles filled, mip chain written) by `tools/sky/make_moon_albedo.py`. Credit:
+*Moon imagery courtesy NASA/GSFC/Arizona State University (LROC).*
+
+| `moon_height.pmoh` | NASA Lunar Reconnaissance Orbiter, Lunar Orbiter Laser Altimeter (LOLA) gridded data record LDEM_16 (NASA PDS Geosciences Node), resampled to 4096 x 2048 | Public domain |
+
+Converted (longitude rolled to the near side's centre, resampled, 16-bit, mip chain) by
+`tools/sky/make_moon_relief.py`. Credit: *Moon topography courtesy NASA/GSFC (LRO LOLA).*
+
+## Whole world data streamed at runtime (not shipped; cached under the player's `world-stream` folder)
+
+| Data | Source | Licence | Used for |
+|---|---|---|---|
+| ESA WorldCover 2021 v200, 10 m | `s3://esa-worldcover` (cloud-optimised GeoTIFFs, read by range requests: `EarthLandCover`) | CC-BY 4.0 | where forest is (`EarthCanopyTrees`) |
+| NASA Black Marble 2016 (VIIRS) | NASA GIBS WMTS, layer `VIIRS_Black_Marble` (`EarthTileCache` night slots) | Public domain | city lights on the night side |
+| Overture Maps buildings (release found from stac.overturemaps.org) | `tiles.overturemaps.org/<release>/buildings.pmtiles`, zoom-14 vector tiles by range request (`EarthOverture`) | ODbL (OpenStreetMap) / CDLA-Permissive-2.0 | building footprints, heights, floors, roof shapes |
+| Terrain Tiles (Terrarium) | AWS Open Data `elevation-tiles-prod`; sources per https://github.com/tilezen/joerd/blob/master/docs/attribution.md | per source (attribution) | elevation and, from zoom 10, sea depths |
+
+Credits: *© ESA WorldCover project 2021 / Contains modified Copernicus Sentinel data (2021) processed by ESA
+WorldCover consortium.* *Night lights: NASA Earth Observatory / NASA GIBS (Black Marble).* *Buildings: © OpenStreetMap contributors, © Overture Maps Foundation.*
+
+## Tidewater (ocean, beach, boat, whale and sea sounds)
+
+Parts of the ocean and shore rendering (waves, foam, sand and underwater look), the boat
+model (`content/default-packs/tidewater-boat/`), the humpback whale and the sea sound
+recordings (`content/default-packs/tidewater-wildlife/`) are ported or exported from
+[Tidewater](https://github.com/dgreenheck/tidewater), an open-source WebGPU ocean demo.
+Its sea recordings are CC0 1.0 Freesound field recordings; their recordists are listed in
+`content/default-packs/tidewater-wildlife/source/sound/CREDITS.md`.
+
+```
+MIT License
+
+Copyright (c) 2026 DRG Software Solutions LLC
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
 
 ## Additional renderer and physics components
 
