@@ -23,6 +23,10 @@ class CfgConquest
     postClass = "Camp";
     flagClass = "FlagCarrier";
 
+    // The arsenal box at each owned post: what taking gear from it costs the side.
+    arsenalWeaponCost = 25;
+    arsenalMagazineCost = 3;
+
     // Mortar support for the player's side (the command view's SUPPORT panel).
     barrageCost = 150;
     barrageCooldown = 120;

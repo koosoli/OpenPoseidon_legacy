@@ -668,3 +668,9 @@ fill (a scripted spawn) rather than the war's own purchasing.
   now also stocked with its side's weapons (`<SIDE>arsenalWeapons[]`; defaults: BLUFOR M16, M16 grenade launcher,
   M21, M60, LAW, Carl Gustav, binoculars; OPFOR AK-74, AK-47, SVD, PK, RPG, binoculars). Not opened by hand in
   the inventory screen yet.
+- **Arsenal prices** (owner, 2026-10-26): taking from an arsenal box costs the box owner's supplies:
+  `arsenalWeaponCost` 25 a weapon, `arsenalMagazineCost` 3 a magazine. The physical inventory checks before the take
+  (unaffordable gear is not offered; a refusal shows the game's hint with the price) and charges once the item has
+  moved (`Conquest::ArsenalTake`, called from `InventoryModel::CanTransfer` / `Transfer`). Checked through the
+  inventory's own transfer (`conquestTestArsenalTake`): a magazine 400 -> 397, a weapon 397 -> 372, both refused at
+  1 and 10 supplies. Multiplayer's classic Gear screen does not charge yet.

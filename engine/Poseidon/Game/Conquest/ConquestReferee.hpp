@@ -29,6 +29,7 @@ namespace Poseidon
 {
 class AIGroup;
 class Person;
+class EntityAI;
 }
 
 namespace Poseidon::Conquest
@@ -229,5 +230,21 @@ std::string RequestPriority(const std::string& objective);
 
 /// Each post's arsenal box as the physical inventory sees it (the conquestArsenals check command).
 std::string ArsenalReport();
+
+/// The physical inventory is about to take `items` (a weapon, or that many magazines) out of
+/// `container`. Free unless it is one of Conquest's arsenal boxes; then the box owner's supplies pay,
+/// when `charge` (a check only otherwise). False, with the reason, when the side cannot pay.
+bool ArsenalTake(const EntityAI* container, bool weapon, int items, bool charge, std::string* why = nullptr);
+struct ArsenalPrices
+{
+    float weapon = 0.0f;
+    float magazine = 0.0f;
+};
+ArsenalPrices GetArsenalPrices();
+/// Is `container` one of the arsenal boxes; the supplies of the side that owns it (tests, the HUD).
+bool IsArsenal(const EntityAI* container);
+float ArsenalOwnerPool(const EntityAI* container);
+/// Test hook (conquestTestArsenalTake): the supplies of the side whose box stands within 30 m of `near`.
+void SetArsenalOwnerPoolForTest(const Vector3& near, float pool);
 
 } // namespace Poseidon::Conquest

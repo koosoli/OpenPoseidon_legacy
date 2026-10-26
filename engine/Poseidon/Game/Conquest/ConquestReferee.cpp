@@ -14,6 +14,7 @@
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
 #include <Poseidon/Game/Chat.hpp>
+#include <Poseidon/UI/Inventory/InventoryModel.hpp>
 #include <Poseidon/AI/AIRadio.hpp>
 #include <Poseidon/World/Entities/Weapons/Shots.hpp>
 #include <Poseidon/World/Entities/Weapons/Weapons.hpp>
@@ -129,6 +130,8 @@ struct Config
     // and an arsenal is also where a soldier changes his weapon.
     std::array<std::vector<std::pair<std::string, int>>, MaxSides> arsenalWeapons;
     float arsenalRestock = 600.0f;                    // seconds until a post's box is replaced by a full one
+    float arsenalWeaponCost = 25.0f;                  // supplies a weapon taken from an arsenal costs its side
+    float arsenalMagazineCost = 3.0f;                 // ... and each magazine
 };
 
 // A line of HQ's radio, kept for the clients in multiplayer.
@@ -411,6 +414,8 @@ bool LoadConfig(Referee& r, const ParamEntry& cfg)
     r.config.barrageSpread = Number(cfg, "barrageSpread", r.config.barrageSpread);
     r.config.barrageAmmo = Text(cfg, "barrageAmmo", r.config.barrageAmmo.c_str());
     r.config.arsenalRestock = Number(cfg, "arsenalRestock", r.config.arsenalRestock);
+    r.config.arsenalWeaponCost = Number(cfg, "arsenalWeaponCost", r.config.arsenalWeaponCost);
+    r.config.arsenalMagazineCost = Number(cfg, "arsenalMagazineCost", r.config.arsenalMagazineCost);
     const float captureRadius = Number(cfg, "captureRadius", 30.0f);
     for (int s = 0; s < r.war.sideCount; s++)
     {
@@ -2987,6 +2992,69 @@ std::vector<Contact> KnownEnemies(int side)
     return out;
 }
 
+bool ArsenalTake(const EntityAI* container, bool weapon, int items, bool charge, std::string* why)
+{
+    Referee& r = R();
+    if (!r.active || !container)
+        return true;
+    for (size_t o = 0; o < r.posts.size(); o++)
+    {
+        if (r.posts[o].arsenal.GetLink() != container)
+            continue;
+        const int side = r.posts[o].arsenalSide;
+        if (side < 0 || side >= MaxSides)
+            return true;
+        const float cost = weapon ? r.config.arsenalWeaponCost : r.config.arsenalMagazineCost * static_cast<float>(std::max(items, 1));
+        if (r.war.pool[side] < cost)
+        {
+            if (why)
+            {
+                char text[160];
+                std::snprintf(text, sizeof(text), "Arsenal: not enough supplies (this costs %.0f, %s has %.0f).", cost,
+                              Name(side).c_str(), r.war.pool[side]);
+                *why = text;
+            }
+            return false;
+        }
+        if (charge)
+            r.war.pool[side] -= cost;
+        return true;
+    }
+    return true; // not an arsenal: free, as any crate or body
+}
+
+bool IsArsenal(const EntityAI* container)
+{
+    for (const Post& post : R().posts)
+        if (container && post.arsenal.GetLink() == container)
+            return true;
+    return false;
+}
+
+float ArsenalOwnerPool(const EntityAI* container)
+{
+    Referee& r = R();
+    for (const Post& post : r.posts)
+        if (container && post.arsenal.GetLink() == container && post.arsenalSide >= 0 && post.arsenalSide < MaxSides)
+            return r.war.pool[post.arsenalSide];
+    return 0.0f;
+}
+
+void SetArsenalOwnerPoolForTest(const Vector3& near, float pool)
+{
+    Referee& r = R();
+    for (const Post& post : r.posts)
+        if (EntityAI* box = post.arsenal; box && post.arsenalSide >= 0 && post.arsenalSide < MaxSides &&
+                                          box->Position().Distance(near) < 30.0f)
+            r.war.pool[post.arsenalSide] = pool;
+}
+
+ArsenalPrices GetArsenalPrices()
+{
+    const Referee& r = R();
+    return {r.config.arsenalWeaponCost, r.config.arsenalMagazineCost};
+}
+
 std::string ArsenalReport()
 {
     // The same test the physical inventory's vicinity pane applies (InventoryModel::ScanVicinity): a
@@ -3013,8 +3081,9 @@ std::string ArsenalReport()
         for (int i = 0; i < list.Size(); i++)
             listed = listed || list[i] == box;
         char line[200];
-        std::snprintf(line, sizeof(line), "%s supply=%d cargoCap=%d weapons=%d magazines=%d listed=%d; ",
-                      static_cast<const char*>(box->GetType()->GetName()), supply ? 1 : 0, cap ? 1 : 0,
+        std::snprintf(line, sizeof(line), "%s at %.1f %.1f supply=%d cargoCap=%d weapons=%d magazines=%d listed=%d; ",
+                      static_cast<const char*>(box->GetType()->GetName()), box->Position().X(), box->Position().Z(),
+                      supply ? 1 : 0, cap ? 1 : 0,
                       supply ? supply->GetWeaponCargoSize() : 0, supply ? supply->GetMagazineCargoSize() : 0,
                       listed ? 1 : 0);
         out += line;
@@ -3223,6 +3292,43 @@ static GameValue ConquestBarrageUnary(const GameState*, GameValuePar oper1)
     return GameValue(RString(why.c_str()));
 }
 
+// conquestTestArsenalTake ["weapon"|"magazine", supplies]: the test of the arsenal's price. Runs the
+// physical inventory's own transfer (InventoryModel::Transfer, what a drag does) for the first item of
+// that kind the player can take from an arsenal in reach, after setting the box owner's supplies when
+// `supplies` is given. "result=<InvTransferResult> pool=<before>-><after>", or why nothing was tried.
+static GameValue ConquestTestArsenalTakeUnary(const GameState*, GameValuePar oper1)
+{
+    using namespace Poseidon;
+    const GameArrayType& a = oper1;
+    if (a.Size() < 1 || a[0].GetType() != GameString)
+        return GameValue(RString("usage: conquestTestArsenalTake [\"weapon\"|\"magazine\", supplies]"));
+    const bool weapon = _stricmp(static_cast<const char*>(static_cast<GameStringType>(a[0])), "weapon") == 0;
+    Person* player = GWorld ? GWorld->GetRealPlayer() : nullptr;
+    if (!player)
+        return GameValue(RString("no player"));
+    if (a.Size() > 1 && a[1].GetType() == GameScalar)
+        Conquest::SetArsenalOwnerPoolForTest(player->Position(), static_cast<float>(a[1]));
+    InventoryModel model(player);
+    model.Refresh();
+    std::string last = "no arsenal item of that kind in reach";
+    for (int i = 0; i < model.Vicinity().Size(); i++)
+    {
+        const InvCell& cell = model.Vicinity()[i];
+        if (!cell.container || cell.fromBody || (cell.kind == InvItemKind::Weapon) != weapon ||
+            !Conquest::IsArsenal(cell.container))
+            continue;
+        const float before = Conquest::ArsenalOwnerPool(cell.container);
+        const InvTransferResult result = model.Transfer(cell, InvPane::Grid);
+        char line[96];
+        std::snprintf(line, sizeof(line), "result=%d pool=%.0f->%.0f", static_cast<int>(result), before,
+                      Conquest::ArsenalOwnerPool(cell.container));
+        last = line;
+        if (result == InvTransferResult::Ok || result == InvTransferResult::Unavailable)
+            break; // taken, or refused (the price): either way the answer
+    }
+    return GameValue(RString(last.c_str()));
+}
+
 // conquestArsenals: each post's arsenal box as the inventory sees it (class, supply, cargo, listed).
 static GameValue ConquestArsenalsNular(const GameState*)
 {
@@ -3269,6 +3375,7 @@ INIT_MODULE(ConquestReferee, 3)
     GGameState.NewFunction(GameFunction(GameScalar, "conquestOrder", ConquestOrderUnary, GameArray));
     GGameState.NewNularOp(GameNular(GameString, "conquestLog", ConquestLogNular));
     GGameState.NewNularOp(GameNular(GameString, "conquestArsenals", ConquestArsenalsNular));
+    GGameState.NewFunction(GameFunction(GameString, "conquestTestArsenalTake", ConquestTestArsenalTakeUnary, GameArray));
     GGameState.NewFunction(GameFunction(GameBool, "conquestStart", ConquestStartUnary, GameArray));
     GGameState.NewFunction(GameFunction(GameAny, "conquestBarrage", ConquestBarrageUnary, GameArray));
     GGameState.NewFunction(GameFunction(GameAny, "conquestTakeControl", ConquestTakeControlUnary, GameScalar));

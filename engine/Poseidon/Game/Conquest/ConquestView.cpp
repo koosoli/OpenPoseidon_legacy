@@ -1401,8 +1401,12 @@ void DrawSoldierHud(const Snapshot& snap)
             if (st.owner == me && st.holder == me && st.level >= 1.0f)
             {
                 // The post's arsenal box (ConquestReferee UpdateArsenals): the inventory restocks from it.
+                const ArsenalPrices prices = GetArsenalPrices();
+                char priced[160];
+                std::snprintf(priced, sizeof(priced), "Arsenal here: open your inventory to restock (weapon %.0f, magazine %.0f of %.0f supplies)",
+                              prices.weapon, prices.magazine, snap.war.pool[me]);
                 const char* hint = GWorld && GWorld->GetMode() == GModeNetware ? "Arsenal here: use the box's Gear action to restock"
-                                                                                : "Arsenal here: open your inventory to restock";
+                                                                                : priced;
                 const ImVec2 t = Measure(f.body, 13.0f, hint);
                 const ImVec2 ha(io.DisplaySize.x * 0.5f - t.x * 0.5f - 14.0f, b.y + 6.0f);
                 draw->AddRectFilled(ha, ImVec2(ha.x + t.x + 28.0f, ha.y + 26.0f), WithAlpha(ColPanel, 0.8f), 13.0f);

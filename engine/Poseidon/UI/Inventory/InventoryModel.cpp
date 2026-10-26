@@ -13,6 +13,8 @@
 #include <Poseidon/AI/EntityAIType.hpp>
 #include <Poseidon/AI/AIUnit.hpp>
 #include <Poseidon/AI/AIGroup.hpp>
+#include <Poseidon/Game/Conquest/ConquestReferee.hpp>
+#include <Poseidon/UI/InGame/InGameUI.hpp>
 #include <Poseidon/AI/AICenter.hpp>
 #include <Poseidon/World/Scene/Object.hpp>   // TargetSide
 #include <Poseidon/Network/Network.hpp>
@@ -2065,6 +2067,11 @@ InvTransferResult InventoryModel::CanTransfer(const InvCell &from, InvPane toPan
 
     if (toPane == InvPane::Grid)
     {
+        // Conquest: an arsenal box's gear costs its side supplies; unaffordable gear is not offered.
+        if (from.container && !from.fromBody &&
+            !Conquest::ArsenalTake(from.container, from.kind == InvItemKind::Weapon, from.isBox ? from.boxMags.Size() : 1,
+                                   false))
+            return InvTransferResult::Unavailable;
         if (from.kind == InvItemKind::Weapon && from.weapon)
             for (int i = 0; i < _player->NWeaponSystems(); ++i)
                 if (_player->GetWeaponSystem(i) == from.weapon)
@@ -2207,6 +2214,18 @@ InvTransferResult InventoryModel::Transfer(const InvCell &from, InvPane toPane)
             return InvTransferResult::Ok;
         }
 
+        // Conquest: an arsenal box sells its gear for its side's supplies (any other container is free).
+        const int arsenalItems = from.kind == InvItemKind::Weapon ? 1 : (from.isBox ? from.boxMags.Size() : 1);
+        {
+            std::string why;
+            if (!Conquest::ArsenalTake(container, from.kind == InvItemKind::Weapon, arsenalItems, false, &why))
+            {
+                if (GWorld->UI())
+                    GWorld->UI()->ShowHint(RString(why.c_str()));
+                return InvTransferResult::Unavailable;
+            }
+        }
+
         // force=true is what makes this weight-only: it skips CheckWeapon /
         // the slot-mask check entirely (confirmed VehicleAI.cpp:1764-1776 and
         // 1983-2000 - `if (!force) { CheckWeapon(...) }`). AI callers still
@@ -2250,6 +2269,7 @@ InvTransferResult InventoryModel::Transfer(const InvCell &from, InvPane toPane)
             }
         }
 
+        Conquest::ArsenalTake(container, from.kind == InvItemKind::Weapon, arsenalItems, true); // the item moved: pay
         if (_player)
         {
             _player->PlayAction(ManActPutDown);   // vanilla gear-handling gesture
