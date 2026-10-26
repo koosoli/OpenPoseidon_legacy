@@ -2,5 +2,5 @@
   "name": "OpenPoseidon Conquest",
   "version": "0.1.0",
   "defaultContentApi": "1",
-  "description": "Conquest: an NPC-driven war for territory, with a top-down commander view (Ctrl+M). Ships the Everon war (Missions\OpenPoseidon\conquest-everon.Eden), started from the main menu's CONQUEST entry. Engine support: engine/Poseidon/Game/Conquest."
+  "description": "Conquest: an NPC-driven war for territory, with a top-down commander view (Ctrl+M). Ships the Everon war (Missions/OpenPoseidon/conquest-everon.Eden), started from the main menu's CONQUEST entry. Engine support: engine/Poseidon/Game/Conquest."
 }
