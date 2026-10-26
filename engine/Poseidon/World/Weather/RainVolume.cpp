@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <string>
 #include <unordered_map>
@@ -29,6 +30,27 @@
 namespace Poseidon
 {
 RainSystem GRain;
+
+// RAIN-LOOK tuning while the look is decided: POSEIDON_RAIN_LOOK_TUNE=alpha,length scale,count scale
+struct RainLookTune
+{
+    float alpha = 0.16f;
+    float length = 1.0f;
+    float count = 2.5f;
+};
+static const RainLookTune& GetRainLookTune()
+{
+    static const RainLookTune tune = [] {
+        RainLookTune t;
+        if (const char* v = std::getenv("POSEIDON_RAIN_LOOK_TUNE"))
+        {
+            std::sscanf(v, "%f,%f,%f", &t.alpha, &t.length, &t.count);
+        }
+        return t;
+    }();
+    return tune;
+}
+
 RainSystem GSnowFlakes;
 
 namespace
@@ -301,6 +323,10 @@ Vector3 RainRelaxVelocity(Vector3Par current, Vector3Par target, float responseP
 
 RainSystem::RainSystem()
 {
+    if (const char* look = std::getenv("POSEIDON_RAIN_LOOK"); look != nullptr && look[0] == '1')
+    {
+        _params.modernLook = true;
+    }
     if (RainTestHook())
     {
         // Forced-max density over whichever layers were asked for: RainBoth by
@@ -600,7 +626,11 @@ void RainSystem::Spawn(float deltaT)
     // roughly the fall from spawn height. The cap is a hard stop so lowering
     // the target in the panel cannot build a spawn debt that fires as a burst.
     const float meanLifetime = std::max(_params.spawnHeight / std::max(_params.fallSpeed, 0.5f), 0.1f);
-    const float rate = static_cast<float>(_params.targetDrops) * EffectiveDensity() / meanLifetime;
+    // RAIN-LOOK: thin, mostly see-through streaks need more of them to read as heavy rain
+    const float lookScale = (!_params.snowflakes && _params.modernLook) ? GetRainLookTune().count : 1.0f;
+    const int targetDrops = static_cast<int>(_params.targetDrops * lookScale);
+    const int maxDrops = static_cast<int>(_params.maxDrops * lookScale);
+    const float rate = static_cast<float>(targetDrops) * EffectiveDensity() / meanLifetime;
     const ISmokeWorldQuery& query = GSmokeWorldQuery();
     const bool probeSpawn = _params.probeAtSpawn && _params.occlusion != RainOcclusionNone;
     if (_params.snowflakes)
@@ -641,7 +671,7 @@ void RainSystem::Spawn(float deltaT)
                 {drop.position.X(), drop.position.Y(), drop.position.Z()},
                 {camPos.X(), camPos.Y(), camPos.Z()}, _params.areaRadius, _params.spawnHeight);
         }));
-        const int target = RainParticlePopulationLimit(_params.targetDrops, _params.maxDrops, EffectiveDensity());
+        const int target = RainParticlePopulationLimit(targetDrops, maxDrops, EffectiveDensity());
         _stats.populationLimit = target;
         if (static_cast<int>(_drops.size()) > target)
         {
@@ -656,7 +686,7 @@ void RainSystem::Spawn(float deltaT)
     while (_spawnAccumulator >= 1.0f)
     {
         _spawnAccumulator -= 1.0f;
-        if (static_cast<int>(_drops.size()) >= _params.maxDrops)
+        if (static_cast<int>(_drops.size()) >= maxDrops)
         {
             _spawnAccumulator = 0.0f;
             break;
@@ -930,12 +960,193 @@ void RainSystem::Simulate(float deltaT)
     }
 }
 
+// RAIN-LOOK: a tapered, soft-edged streak (u across, v along; the head at v = 1 is the brightest,
+// the tail fades out), and a thin ring for the splashes.
+static float RainStreakAlpha(float u, float v)
+{
+    const float across = std::exp(-Square((u - 0.5f) / 0.22f));
+    const float along = std::pow(std::sin(3.14159265f * v), 0.6f) * (0.55f + 0.45f * v);
+    return across * along;
+}
+
+static float RainRingAlpha(float x, float y)
+{
+    const float r = std::sqrt(x * x + y * y);
+    return r < 1.0f ? std::exp(-Square((r - 0.78f) / 0.09f)) : 0.0f;
+}
+
+// a streak texture laid along x (the long axis of DrawDecalRotated's quad runs along u)
+static float RainStreakAlongU(float u, float v)
+{
+    return RainStreakAlpha(v, u);
+}
+
+static Ref<Texture> MakeRainTexture(int w, int h, float (*alpha)(float, float), bool centred)
+{
+    std::vector<uint8_t> pixels(static_cast<size_t>(w) * h * 4, 255);
+    for (int y = 0; y < h; ++y)
+    {
+        for (int x = 0; x < w; ++x)
+        {
+            const float u = (x + 0.5f) / w;
+            const float v = (y + 0.5f) / h;
+            const float a = centred ? alpha(u * 2.0f - 1.0f, v * 2.0f - 1.0f) : alpha(u, v);
+            pixels[(static_cast<size_t>(y) * w + x) * 4 + 3] = static_cast<uint8_t>(255.0f * std::clamp(a, 0.0f, 1.0f));
+        }
+    }
+    return GEngine->TextBank()->CreateDynamic(w, h, pixels.data(), static_cast<uint32_t>(pixels.size()), true,
+                                              AlphaStats::Blend);
+}
+
+void RainSystem::DrawModern()
+{
+    if (!_streakTexture)
+        _streakTexture = MakeRainTexture(128, 16, RainStreakAlongU, false);
+    if (!_ringTexture)
+        _ringTexture = MakeRainTexture(64, 64, RainRingAlpha, true);
+    if (!_streakTexture || !_ringTexture)
+        return;
+    MipInfo streakMip = GEngine->TextBank()->UseMipmap(_streakTexture.GetRef(), 0, 0);
+    MipInfo ringMip = GEngine->TextBank()->UseMipmap(_ringTexture.GetRef(), 0, 0);
+    if (!streakMip.IsOK() || !ringMip.IsOK())
+        return;
+
+    const Camera& camera = *GScene->GetCamera();
+    Matrix4Val project = camera.Projection();
+    Matrix4Val toView = GScene->ScaledInvTransform();
+    const float nearest = camera.Near() * 10.0f;
+    const float invLeft = camera.InvLeft();
+    const float invTop = camera.InvTop();
+    const Vector3 camPos = camera.Position();
+
+    // The light a drop shows: the sky's, as the snow's (an averaged hemisphere), a little under it
+    // since a drop transmits most of what is behind it. Not a tint: at noon the streaks are bright
+    // against houses and trees and almost gone against the sky; at night they need a light.
+    float radiance = 0.02f;
+    Vector3 toSun(0, 1, 0);
+    float sunGlint = 0.0f;
+    if (const LightSun* sun = GScene->MainLight())
+    {
+        const auto sky = GEngine->GetSkySettings();
+        const float daylight = 1.0f - std::clamp(sun->NightEffect(), 0.0f, 1.0f);
+        radiance = std::max(0.02f, sky.sunIntensity * sky.exposure * 0.14f * daylight);
+        toSun = -sun->SunDirection(); // SunDirection points FROM the sun
+        toSun.Normalize();
+        // drops toward the sun glint (forward scattering through the drop), less so under a thick deck
+        const float overcast = GLandscape != nullptr ? GLandscape->GetOvercast() : 0.0f;
+        sunGlint = daylight * (1.0f - 0.75f * overcast) * std::clamp(toSun.Y() * 4.0f + 0.2f, 0.0f, 1.0f);
+    }
+    // grey-white, a little cool: the sky seen through and off a drop
+    const Color white(0.86f, 0.89f, 0.93f, 1.0f);
+    // a streak is a few millimetres of water smeared by its fall: mostly see-through. The first pass
+    // (0.34, sky x 0.28) drew bright white lines (owner, 2026-10-26: "looks like white lines"); rain
+    // reads as a faint grey veil, so each streak is barely there and the count does the work.
+    const float streakAlpha = GetRainLookTune().alpha * _params.opacity;
+    const float widthM = 0.012f;
+
+    for (const Drop& drop : _drops)
+    {
+        if (drop.indoor)
+            continue;
+        const Vector3 velocity(drop.velocityX, -drop.speed, drop.velocityZ);
+        const float speed = std::max(velocity.Size(), 0.001f);
+        const float horizontalSpeed = std::sqrt(Square(drop.velocityX) + Square(drop.velocityZ));
+        const float streakLength = _params.streakLength * GetRainLookTune().length * (1.0f + horizontalSpeed / speed);
+        const Vector3 tailWorld = drop.position - velocity * (streakLength / speed);
+
+        const Vector3 headView = toView * drop.position;
+        const Vector3 tailView = toView * tailWorld;
+        if (headView.Z() < nearest || tailView.Z() < nearest)
+            continue;
+        const Vector3 midWorld = (drop.position + tailWorld) * 0.5f;
+        const Vector3 midView = toView * midWorld;
+        const float invWHead = 1.0f / headView.Z();
+        const float invWTail = 1.0f / tailView.Z();
+        const float invWMid = 1.0f / midView.Z();
+        const float hx = project(0, 2) + project(0, 0) * headView.X() * invWHead;
+        const float hy = project(1, 2) + project(1, 1) * headView.Y() * invWHead;
+        const float tx = project(0, 2) + project(0, 0) * tailView.X() * invWTail;
+        const float ty = project(1, 2) + project(1, 1) * tailView.Y() * invWTail;
+        const float dirX = hx - tx;
+        const float dirY = hy - ty;
+        const float lengthPx = std::sqrt(dirX * dirX + dirY * dirY);
+        if (lengthPx < 0.5f)
+            continue;
+
+        // thin streaks are drawn two pixels wide and that much fainter: narrower, a rotated quad
+        // flickers along its length into dotted lines; far rain is a fine veil, not a field of dashes
+        float widthPx = std::fabs(project(0, 0)) * widthM * invWMid * invLeft;
+        float coverage = 1.0f;
+        if (widthPx < 2.0f)
+        {
+            coverage = std::max(widthPx / 2.0f, 0.12f);
+            widthPx = 2.0f;
+        }
+
+        const float nearPos = floatMax(midView.Z() - std::min(streakLength * 0.10f, 0.10f), nearest);
+        const float invNearPos = 1.0f / nearPos;
+        Vector3 posp(project(0, 2) + project(0, 0) * midView.X() * invWMid,
+                     project(1, 2) + project(1, 1) * midView.Y() * invWMid,
+                     project(2, 2) + project.Position()[2] * invNearPos);
+
+        const Vector3 toDrop = drop.position - camPos;
+        const float distance2 = toDrop.SquareSize();
+        const float fog = GScene->Fog8(distance2) * (1.0f / 255.0f);
+        const float dist = std::sqrt(distance2);
+        // the nearest drops would draw long bright lines across the lens: fade them in over 3 m
+        const float nearFade = std::clamp((dist - 0.6f) / 2.4f, 0.0f, 1.0f);
+        const float cosSun = std::max((toDrop * toSun) / std::max(dist, 1e-3f), 0.0f);
+        const float glint = 1.0f + 3.0f * sunGlint * std::pow(cosSun, 10.0f);
+
+        Color colour = white;
+        colour.SetA(std::clamp(streakAlpha * coverage * nearFade * glint, 0.0f, 1.0f) * (1.0f - fog));
+        GEngine->DrawDecalRotated(posp, invNearPos, widthPx * 0.5f, lengthPx * 0.5f, PackedColor(colour), streakMip,
+                                  kRainSpecials, dirX, dirY, radiance * std::min(glint, 2.0f));
+        ++_stats.streakDecals;
+        ++_stats.drawnDrops;
+    }
+
+    // Splashes: a thin ring that widens and fades where a drop lands, laid flat on the ground (from
+    // eye height a narrow ellipse, not a disc facing the camera).
+    for (const Splash& splash : _splashes)
+    {
+        const float t = std::clamp(splash.age / std::max(_params.splashLifetime, 1e-3f), 0.0f, 1.0f);
+        const float radius = 0.03f + 0.6f * _params.splashSize * std::sqrt(t);
+        const Vector3 view = toView * splash.position;
+        if (view.Z() < nearest)
+            continue;
+        const float invW = 1.0f / view.Z();
+        const float nearPos = floatMax(view.Z() - 0.05f, nearest);
+        const float invNearPos = 1.0f / nearPos;
+        Vector3 posp(project(0, 2) + project(0, 0) * view.X() * invW, project(1, 2) + project(1, 1) * view.Y() * invW,
+                     project(2, 2) + project.Position()[2] * invNearPos);
+        const float halfW = std::fabs(project(0, 0)) * radius * invW * invLeft;
+        const Vector3 toSplash = splash.position - camPos;
+        const float dist = std::max(toSplash.Size(), 1e-3f);
+        const float flat = std::clamp(-toSplash.Y() / dist, 0.12f, 1.0f);
+        const float halfH = std::fabs(project(1, 1)) * radius * invW * invTop * flat;
+        if (halfW < 0.6f)
+            continue;
+        const float fog = GScene->Fog8(toSplash.SquareSize()) * (1.0f / 255.0f);
+        Color colour = white;
+        colour.SetA(0.55f * _params.opacity * std::pow(1.0f - t, 1.5f) * (1.0f - fog));
+        // the quad's long axis horizontal on screen: the ring's width across, its foreshortened depth up
+        GEngine->DrawDecalRotated(posp, invNearPos, halfH, halfW, PackedColor(colour), ringMip, kRainSpecials, 1.0f,
+                                  0.0f, radiance * 1.2f);
+    }
+}
+
 void RainSystem::Draw()
 {
     _stats.drawnDrops = 0;
     _stats.streakDecals = 0;
     if (GScene == nullptr || GEngine == nullptr || GScene->GetCamera() == nullptr)
     {
+        return;
+    }
+    if (!_params.snowflakes && _params.modernLook)
+    {
+        DrawModern();
         return;
     }
     if (_params.snowflakes && !_snowTexture)

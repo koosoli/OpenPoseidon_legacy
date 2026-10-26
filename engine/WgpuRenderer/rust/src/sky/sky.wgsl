@@ -90,6 +90,8 @@ struct Sky {
     moon_centre: vec4<f32>,
     ecef_x: vec4<f32>,
     ecef_z: vec4<f32>,
+    // (OP, RAIN-DECK) x: the weather's rain density 0..1, eased (renderer-written); yzw unused
+    weather: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> sky: Sky;
@@ -1840,7 +1842,10 @@ fn march_clouds(
     }
     // The far dissolve is folded into the march itself (far_fade on density), so the raw accumulated
     // (inscatter, transmittance) already dissolves toward the distance cap — no post fade needed.
-    res.inscatter = col;
+    // (OP, RAIN-DECK) a raining deck is a dark one (owner, 2026-10-26: "when it rains make those rain
+    // clouds darker"): nimbostratus is deep and water-laden, and its base reads slate grey where a dry
+    // overcast of the same coverage stays light. Heavy rain takes the deck's light to 40%.
+    res.inscatter = col * (1.0 - 0.6 * clamp(sky.weather.x, 0.0, 1.0));
     // The early-out above LEFT transmittance at the cut instead of driving it to zero, so a deck
     // that is opaque to the eye still passed ~1% of whatever was behind it. That is harmless for a
     // background of ordinary radiance and catastrophic for the sun disc, whose radiance is the solar

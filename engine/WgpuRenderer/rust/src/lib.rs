@@ -4646,6 +4646,7 @@ impl Renderer {
         if let Some(tw) = self.water.tidewater_mut() {
             tw.set_rain(ground_weather[1]);
         }
+        self.sky.set_rain(ground_weather[1]);
         let bounds = self.terrain.native_height_bounds();
         // Unknown on a streamed Earth patch: its mountains are not in the island's heightmap.
         self.gfx3d.set_world_max_height(if bounds[1] > bounds[0] && !self.grass.earth_active() { bounds[1] }

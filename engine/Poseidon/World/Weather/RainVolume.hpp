@@ -77,6 +77,14 @@ struct RainParams
 	float green = 0.52f;
 	float blue = 0.62f;
 
+	/// RAIN-LOOK (2026-10-26, owner: "not sure i like our current rain"): drops lit by the scene
+	/// instead of a fixed grey-blue tint -- sky-lit, mostly transparent, bright against dark
+	/// ground and nearly gone against the sky, catching the light toward the sun -- drawn as thin
+	/// tapered streaks whose sub-pixel width becomes faintness, not dashes, and ring splashes laid
+	/// flat on the ground. Drawing only: occlusion, puddles and wind are unchanged.
+	/// POSEIDON_RAIN_LOOK=1 forces it on; the Weather tab switches it.
+	bool modernLook = false;
+
 	// -- ground interaction -----------------------------------------------
 	bool splashes = true;        ///< brief expanding sprite where a drop lands
 	float splashSize = 0.35f;    ///< splash radius at end of life, m
@@ -219,6 +227,8 @@ public:
 		_splashes.clear();
 		_spawnAccumulator = 0.0f;
 		_snowTexture = nullptr;
+		_streakTexture = nullptr;
+		_ringTexture = nullptr;
         _snowVolumeReady = false;
         _snowTarget = 0;
 	}
@@ -227,6 +237,8 @@ private:
 	void Spawn(float deltaT);
 	void Simulate(float deltaT);
 	void Draw();
+	/// RAIN-LOOK (RainParams::modernLook): the same drops and splashes, lit by the scene.
+	void DrawModern();
 	/// Resolve every building overlapping the camera-following rain disc once
 	/// per frame (Rooms mode). The previous design cached only the building
 	/// containing the camera, so rain crossed every nearby roof while outdoors.
@@ -240,6 +252,8 @@ private:
 	RainMode _mode = RainParticle;
 	RainParams _params{};
 	Ref<Texture> _snowTexture;
+	Ref<Texture> _streakTexture; ///< RAIN-LOOK: a tapered, soft-edged streak
+	Ref<Texture> _ringTexture;   ///< RAIN-LOOK: a thin splash ring
 	RainStats _stats{};
 	float _legacyDensityOverride = -1.0f;
 
