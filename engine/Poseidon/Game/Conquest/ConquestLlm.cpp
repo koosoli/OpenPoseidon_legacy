@@ -70,10 +70,13 @@ std::string SystemPrompt()
            "{\"priorities\": [{\"objective\": \"<objective name>\", \"weight\": <-2..3>}],\n"
            " \"posture\": \"attack\" | \"balanced\" | \"defend\",\n"
            " \"buy\": \"<squad type name>\" or \"\",\n"
+           " \"barrage\": \"<objective name>\" or \"\",\n"
            " \"reason\": \"<one short sentence a radio operator could read out>\"}\n"
            "Weight 3 = the main effort, 1 = worth pushing, 0 = no opinion, -2 = leave it alone for now. Name only "
            "objectives and squad types from the report. You can only capture an objective next to one you hold; "
-           "your HQ falls last. Keep the reason short.";
+           "your HQ falls last. \"barrage\" calls the mortars on the enemy your side has seen at that objective (it "
+           "costs supplies and needs an objective of yours in range; leave it empty to keep the supplies). Keep the "
+           "reason short.";
 }
 
 bool ParseAdvice(const std::string& text, const std::vector<std::string>& objectives,
@@ -116,10 +119,12 @@ bool ParseAdvice(const std::string& text, const std::vector<std::string>& object
     }
     if (const cJSON* buy = cJSON_GetObjectItemCaseSensitive(root, "buy"); cJSON_IsString(buy))
         out.buy = Match(squadTypes, buy->valuestring);
+    if (const cJSON* barrage = cJSON_GetObjectItemCaseSensitive(root, "barrage"); cJSON_IsString(barrage))
+        out.barrage = Match(objectives, barrage->valuestring);
     if (const cJSON* reason = cJSON_GetObjectItemCaseSensitive(root, "reason"); cJSON_IsString(reason))
         out.reason = std::string(reason->valuestring).substr(0, 240);
     cJSON_Delete(root);
-    if (out.priorities.empty() && out.posture.empty() && out.buy.empty())
+    if (out.priorities.empty() && out.posture.empty() && out.buy.empty() && out.barrage.empty())
     {
         error = "the answer names no known objective, posture or squad type";
         return false;

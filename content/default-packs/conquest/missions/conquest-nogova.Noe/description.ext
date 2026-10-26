@@ -1,0 +1,3 @@
+// Conquest on Nogova, single player: the war's rules are conquest.hpp (the same in every Conquest
+// mission), its objectives come from the island's towns (objectives.hpp).
+#include "conquest.hpp"

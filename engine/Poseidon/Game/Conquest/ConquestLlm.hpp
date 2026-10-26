@@ -24,6 +24,7 @@ struct Advice
     std::vector<std::pair<std::string, float>> priorities; // objective name -> weight (-2 .. +3)
     std::string posture;                                   // "attack", "balanced" or "defend"
     std::string buy;                                       // a squad type the side should buy next, or ""
+    std::string barrage;                                   // an objective whose known enemies the mortars should shell, or ""
     std::string reason;                                    // one sentence, for the war log and HQ
 };
 

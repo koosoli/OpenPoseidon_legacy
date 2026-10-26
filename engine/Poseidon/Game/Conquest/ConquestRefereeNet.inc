@@ -130,6 +130,23 @@ void Publish(Referee& r, float now)
         ea.Add(GameValue(static_cast<float>(r.bought[s])));
         ea.Add(GameValue(std::max(0.0f, r.lastBarrage[s] + r.config.barrageCooldown - now)));
         ea.Add(GameValue(now < r.humanUntil[s]));
+        // who commands, and the vote on it
+        Person* holder = now < r.humanUntil[s] ? r.seat[s].GetLink() : nullptr;
+        ea.Add(GameValueExt(static_cast<Object*>(holder)));
+        ea.Add(GameValue(RString(holder ? PlayerName(holder).c_str() : "")));
+        const Referee::Vote& v = r.vote[s];
+        GameValue vote = NetArray();
+        GameArrayType& va = vote;
+        va.Add(GameValue(v.active));
+        va.Add(GameValue(std::max(0.0f, v.until - now)));
+        va.Add(GameValue(static_cast<float>(v.yes.size())));
+        va.Add(GameValue(static_cast<float>(v.no.size())));
+        va.Add(GameValue(static_cast<float>(v.active ? Electorate(r, s) : 0)));
+        va.Add(GameValue(RString(v.targetName.c_str())));
+        va.Add(GameValue(RString(v.callerName.c_str())));
+        ea.Add(vote);
+        ea.Add(GameValue(std::max(0.0f, r.lastAir[s] + r.config.airCooldown - now)));
+        ea.Add(GameValue(std::any_of(r.strikes.begin(), r.strikes.end(), [s](const Strike& k) { return k.side == s; })));
         sa.Add(e);
     }
     a.Add(sides);
@@ -204,6 +221,9 @@ void Publish(Referee& r, float now)
         la.Add(GameValue(RString(r.snapshot.log[i].c_str())));
     a.Add(log);
 
+    a.Add(GameValue(static_cast<float>(r.winner)));
+    a.Add(GameValue(RString(r.winReason.c_str())));
+
     gs->VarSet("conquestNet", root);
     GetNetworkManager().PublicVariable("conquestNet");
 }
@@ -253,6 +273,15 @@ void ReadNet(Referee& r)
     r.netSeq = seq;
     r.started = Flag(a, 2);
     r.ended = Flag(a, 3);
+    // The server left the Resistance out: so does the mirror.
+    if (a[5].GetType() == GameArray)
+        while (r.war.sideCount > 2 && static_cast<const GameArrayType&>(a[5]).Size() < r.war.sideCount)
+            DropLastSide(r.war, r.tuning, 0.0f);
+    if (a.Size() > 11)
+    {
+        r.winner = static_cast<int>(Num(a, 10, NoSide));
+        r.winReason = Str(a, 11);
+    }
 
     const GameArrayType& oa = a[4];
     for (int o = 0; o < oa.Size() && o < static_cast<int>(r.war.defs.size()); o++)
@@ -288,6 +317,25 @@ void ReadNet(Referee& r)
         r.bought[s] = static_cast<int>(Num(e, 5));
         r.netCooldown[s] = Num(e, 6);
         r.netHuman[s] = Flag(e, 7);
+        r.netSeat[s] = e.Size() > 8 ? dyn_cast<Person>(GetObject(e[8])) : nullptr;
+        r.netSeatName[s] = Str(e, 9);
+        CommandSeat& c = r.netVote[s];
+        c = CommandSeat();
+        if (e.Size() > 10 && e[10].GetType() == GameArray)
+        {
+            const GameArrayType& va = e[10];
+            c.vote = Flag(va, 0);
+            c.voteLeft = Num(va, 1);
+            c.yes = static_cast<int>(Num(va, 2));
+            c.no = static_cast<int>(Num(va, 3));
+            c.electorate = static_cast<int>(Num(va, 4));
+            c.voteTarget = Str(va, 5);
+            c.voteCaller = Str(va, 6);
+        }
+        if (s == r.playerSide && !c.vote)
+            r.myVote = 0;
+        r.netAirCooldown[s] = Num(e, 11);
+        r.netAirInbound[s] = Flag(e, 12);
     }
 
     const GameArrayType& ga = a[6];
@@ -397,6 +445,14 @@ void MirrorStep(Referee& r, float now)
                 LOG_INFO(Mission, "Conquest: net test: asked for command and sent {} to Figari ({} squad)", Callsign(rec.id), n);
                 break;
             }
+    if (r.localCommand && r.playerSide != NoSide && r.netSeq != 0 && now - r.commandSince > 4.0f &&
+        r.netSeat[r.playerSide].GetLink() != GWorld->GetRealPlayer())
+    {
+        r.localCommand = false;
+        r.commandLoss = r.netSeatName[r.playerSide].empty()
+                            ? "You do not have command (your side voted you out, or command was not free)."
+                            : r.netSeatName[r.playerSide] + " commands your side.";
+    }
     if (r.localCommand && now - r.lastCommandBeat > 10.0f)
     {
         r.lastCommandBeat = now;

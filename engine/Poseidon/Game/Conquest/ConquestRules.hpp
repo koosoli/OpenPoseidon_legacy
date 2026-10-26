@@ -139,6 +139,32 @@ bool SpawnEligible(const War& war, int side, int index, float now, const Tuning&
 /// side is left undefeated, else NoSide.
 int StepEconomy(War& war, float dt, const Tuning& tuning);
 
+/// The victory condition the setup screen sets: the side holding at least `towns` objectives other
+/// than HQs has won (towns <= 0: off). Several at once cannot happen while towns is over half of them;
+/// below that, the one holding most wins.
+int TownVictor(const War& war, int towns);
+
+/// Objectives other than HQs: the most villages a victory condition can ask for.
+int TownCount(const War& war);
+
+/// Takes the war's last side out before it begins (the Resistance, when the setup leaves it off):
+/// what it would have held, its HQ included, becomes a neutral town. Restarts the war.
+void DropLastSide(War& war, const Tuning& tuning, float startPool);
+
+/// A named place of an island (CfgWorlds >> world >> Names): what a war is generated from.
+struct Place
+{
+    std::string name;
+    float x = 0.0f, y = 0.0f;
+    int rank = 0; // 0 village, 1 town, 2 capital
+};
+
+/// A war's objectives for an island nobody wrote one for: every town, the HQs of the `sides` sides
+/// as far apart as the island allows (the third as far from both as it can be), each town linked to
+/// its nearest (up to three, within `link` metres) and the whole map kept connected. Places closer
+/// than 200 m to a larger one are merged into it.
+std::vector<ObjectiveDef> AutoObjectives(const std::vector<Place>& places, int sides, float link = 2500.0f);
+
 /// A soldier of `side` died (war score).
 void RecordLoss(War& war, int side, const Tuning& tuning);
 

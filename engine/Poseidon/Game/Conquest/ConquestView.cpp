@@ -32,6 +32,7 @@
 #include <Poseidon/World/Entities/Vehicles/Air/Airplane.hpp>
 #include <Poseidon/World/Entities/Vehicles/Air/Helicopter.hpp>
 #include <Poseidon/World/Entities/Vehicles/Ground/Tank.hpp>
+#include <Poseidon/UI/InGame/InGameUI.hpp>
 #include <Poseidon/World/Entities/Vehicles/Misc/Ship.hpp>
 #include <Poseidon/World/Entities/Vehicles/Transport.hpp>
 #include <Poseidon/World/Scene/Camera/CamEffects.hpp>
@@ -192,6 +193,7 @@ struct State
     OLink<EntityAI> follow;  // the camera keeps him (or his vehicle) centred
     bool dragPan = false;    // Ctrl + left drag moves the view
     bool targeting = false;  // the next left click places the mortar barrage
+    bool targetAir = false;  // ... or the air strike
     bool optionsOpen = false;
     bool deployOpen = false; // the DEPLOY / SUPPORT panel (B, or the top bar's Deploy)
     bool helpOpen = false;   // the controls row (H)
@@ -199,6 +201,8 @@ struct State
     std::vector<ImU32> miniColours; // the minimap's ground, MiniCells x MiniCells, north up
     int miniCells = 0;
     bool setupGrab = false;  // the setup screen freed the mouse
+    bool endGrab = false;    // the end screen freed the mouse
+    bool endClosed = false;  // ... and the player closed it to look on
     std::string setupStart = "soldier";
     bool boxDrag = false;
     float boxX0 = 0.0f;
@@ -657,6 +661,18 @@ void FireBarrageAt(float uiX, float uiY)
     if (!GroundAt(uiX, uiY, x, y))
         return;
     std::string why;
+    if (s.targetAir)
+    {
+        s.targetAir = false;
+        if (!OrderAirStrike(x, y, &why))
+        {
+            SetStatus("No air strike: " + why, ColWarn);
+            return;
+        }
+        s.flashes.push_back({x, y, SDL_GetTicks()});
+        SetStatus("Air support inbound. Bombs on target in about forty seconds.", ColWarn);
+        return;
+    }
     if (!OrderBarrage(x, y, &why))
     {
         SetStatus("No barrage: " + why, ColWarn);
@@ -866,6 +882,11 @@ void DrawShroud(ImDrawList* draw)
     if (GetOptions().fog != FogMode::Shroud || !GLandscape)
         return;
     const State& s = St();
+    // A map overlay, for the view from above: as the camera comes down towards the ground (and
+    // first person) it fades out, and close to the ground it is not drawn at all (the minimap keeps it).
+    const float fade = std::clamp((s.distance - 250.0f) / 300.0f, 0.0f, 1.0f) * std::clamp((s.pitch - 25.0f) / 20.0f, 0.0f, 1.0f);
+    if (fade <= 0.0f)
+        return;
     constexpr float cell = 100.0f;
     const float range = std::clamp(s.distance * 4.0f, 900.0f, 7000.0f);
     const int x0 = static_cast<int>(std::floor((s.focusX - range) / cell));
@@ -913,7 +934,7 @@ void DrawShroud(ImDrawList* draw)
             draw->PrimWriteIdx(static_cast<ImDrawIdx>(base + 2));
             draw->PrimWriteIdx(static_cast<ImDrawIdx>(base + 3));
             for (size_t q : k)
-                draw->PrimWriteVtx(ImVec2(at[q].x, at[q].y), uv, IM_COL32(4, 6, 9, static_cast<int>(245 * dark[q])));
+                draw->PrimWriteVtx(ImVec2(at[q].x, at[q].y), uv, IM_COL32(4, 6, 9, static_cast<int>(245 * dark[q] * fade)));
         }
 }
 
@@ -964,6 +985,50 @@ void DrawObjectives(ImDrawList* draw)
     }
 }
 
+// A human player's mark over his soldier symbol: a white ring round a head, so the commander knows
+// that squad answers to a person (orders to it are requests) and that soldier cannot be taken over.
+void DrawPlayerBadge(ImDrawList* draw, ImVec2 c, float alpha)
+{
+    const ImU32 ring = IM_COL32(255, 255, 255, static_cast<int>(240 * alpha));
+    draw->AddCircleFilled(c, 5.5f, IM_COL32(20, 24, 30, static_cast<int>(210 * alpha)), 14);
+    draw->AddCircle(c, 5.5f, ring, 14, 1.4f);
+    draw->AddCircleFilled(ImVec2(c.x, c.y - 1.2f), 1.7f, ring, 8);
+    draw->AddLine(ImVec2(c.x - 2.6f, c.y + 3.0f), ImVec2(c.x + 2.6f, c.y + 3.0f), ring, 1.4f);
+}
+
+// The commander's mark: a small gold star, discreet, the "commander's uniform" his side can see.
+void DrawCommanderMark(ImDrawList* draw, ImVec2 c, float r, float alpha)
+{
+    ImVec2 pts[10];
+    for (int i = 0; i < 10; i++)
+    {
+        const float a = -1.5707963f + static_cast<float>(i) * 0.6283185f;
+        const float rr = i % 2 == 0 ? r : r * 0.45f;
+        pts[i] = ImVec2(c.x + std::cos(a) * rr, c.y + std::sin(a) * rr);
+    }
+    draw->AddConcavePolyFilled(pts, 10, IM_COL32(236, 196, 92, static_cast<int>(235 * alpha)));
+    draw->AddPolyline(pts, 10, IM_COL32(40, 30, 10, static_cast<int>(200 * alpha)), ImDrawFlags_Closed, 1.0f);
+}
+
+// On the ground: his teammates see the star over their commander's soldier, close by only (300 m)
+// and fading with distance, so it marks him without becoming a beacon.
+void DrawCommanderOnGround()
+{
+    const int side = PlayerSide();
+    const Person* commander = CommanderSoldier(side);
+    Person* me = GWorld ? GWorld->GetRealPlayer() : nullptr;
+    if (!commander || !me || commander == me || commander->IsDammageDestroyed())
+        return;
+    const float distance = commander->Position().Distance(me->Position());
+    if (distance > 300.0f)
+        return;
+    ScreenPoint p;
+    if (!Project(commander->RenderWorldTransform().Position() + Vector3(0.0f, 2.25f, 0.0f), p))
+        return;
+    const float alpha = std::clamp(1.0f - distance / 300.0f, 0.25f, 0.85f);
+    DrawCommanderMark(ImGui::GetBackgroundDrawList(), ImVec2(p.x, p.y), distance < 60.0f ? 5.0f : 4.0f, alpha);
+}
+
 void DrawSquads(ImDrawList* draw, const std::vector<SquadDraw>& squads)
 {
     const Snapshot& snap = GetSnapshot();
@@ -996,9 +1061,22 @@ void DrawSquads(ImDrawList* draw, const std::vector<SquadDraw>& squads)
         for (size_t i = 0; i < d.vehicles.size(); i++)
             DrawSymbol(draw, ImVec2(d.vehicles[i].x, d.vehicles[i].y), 10.0f, ArmOf(d.vehicleObjects[i]), false, colour,
                        alpha, sel && !picked);
+        bool humans = false;
         for (size_t i = 0; i < d.members.size(); i++)
+        {
             DrawSymbol(draw, ImVec2(d.members[i].x, d.members[i].y), 7.0f, Arm::Infantry, false, colour, alpha,
                        sel && (!picked || d.soldiers[i] == picked));
+            if (d.soldiers[i] && d.soldiers[i] == CommanderSoldier(d.group.side))
+            {
+                humans = true;
+                DrawCommanderMark(draw, ImVec2(d.members[i].x, d.members[i].y - 14.0f), 6.0f, alpha);
+            }
+            else if (IsHumanPlayer(d.soldiers[i]))
+            {
+                humans = true;
+                DrawPlayerBadge(draw, ImVec2(d.members[i].x, d.members[i].y - 14.0f), alpha);
+            }
+        }
         if (!d.leaderVisible)
             continue;
         // A callsign only where it helps: the selected squads, and the one under the pointer.
@@ -1006,7 +1084,7 @@ void DrawSquads(ImDrawList* draw, const std::vector<SquadDraw>& squads)
         const bool hovered = std::hypot(mouse.x - d.leader.x, mouse.y - d.leader.y) < 36.0f;
         if (!sel && !hovered)
             continue;
-        const std::string name = CallsignFull(d.group.id) + "  " + std::to_string(d.men);
+        const std::string name = CallsignFull(d.group.id) + "  " + std::to_string(d.men) + (humans ? "  PLAYER" : "");
         const ImVec2 at(d.leader.x, d.leader.y - 24.0f);
         Pill(draw, at, f.bold, 13.0f, name.c_str(), sel ? IM_COL32(18, 60, 72, 235) : IM_COL32(12, 16, 22, 200),
              sel ? ColSelect : colour);
@@ -1068,7 +1146,7 @@ void DrawBox(ImDrawList* draw)
         float x = 0.0f, y = 0.0f;
         if (GroundAt(m.x, m.y, x, y))
         {
-            const float spread = 35.0f;
+            const float spread = s.targetAir ? std::max(15.0f, AirStrike().spread * AirStrike().bombs * 0.5f) : 35.0f;
             ScreenPoint prev;
             bool prevOk = false;
             for (int i = 0; i <= 40; i++)
@@ -1634,7 +1712,8 @@ void DrawDeploy(const Snapshot& snap)
             std::snprintf(line, sizeof(line), "%.0f", types[t].cost);
             const ImVec2 ct = Measure(Font().display, 16.0f, line);
             Put(draw, Font().display, 16.0f, ImVec2(b.x - ct.x - 10.0f, b.y - ct.y - 6.0f), can ? ColGood : ColBad, line);
-            if (pressed && can)
+            // Short of supplies or a quiet base, a click still orders it: the order waits (2 min) and deploys when it can.
+            if (pressed)
             {
                 std::string refused;
                 const int id = BuySquad(s.deployBase, static_cast<int>(t), &refused);
@@ -1646,13 +1725,15 @@ void DrawDeploy(const Snapshot& snap)
                     SetStatus(types[t].name + " deployed at " + snap.war.defs[s.deployBase].name + "  -  " +
                               CallsignFull(id) + " awaits your orders");
                 }
+                else if (refused.rfind("queued", 0) == 0)
+                    SetStatus(types[t].name + " " + refused, ColWarn);
                 else
                     SetStatus("Cannot deploy: " + refused, ColWarn);
             }
             if (hovered && !can)
             {
                 ImGui::BeginTooltip();
-                ImGui::TextUnformatted(("Not now: " + reason).c_str());
+                ImGui::TextUnformatted(("Not now: " + reason + ". Click to queue it: it deploys when it can.").c_str());
                 ImGui::EndTooltip();
             }
             ImGui::PopID();
@@ -1664,21 +1745,21 @@ void DrawDeploy(const Snapshot& snap)
             const BarrageInfo b = Barrage();
             const bool ready = b.cooldownLeft <= 0.0f && snap.war.pool[me] >= b.cost;
             const ImVec2 at = ImGui::GetCursorScreenPos();
-            const float w = 322.0f, h = 50.0f;
+            const float w = 156.0f, h = 50.0f;
             const bool pressed = ImGui::InvisibleButton("barrage", ImVec2(w, h));
             const bool hovered = ImGui::IsItemHovered();
             ImDrawList* draw = ImGui::GetWindowDrawList();
             draw->AddRectFilled(at, ImVec2(at.x + w, at.y + h),
-                                s.targeting ? WithAlpha(ColWarn, 0.25f)
+                                s.targeting && !s.targetAir ? WithAlpha(ColWarn, 0.25f)
                                 : ready     ? (hovered ? IM_COL32(60, 78, 102, 255) : IM_COL32(38, 48, 64, 255))
                                             : IM_COL32(30, 34, 42, 200),
                                 10.0f);
-            Put(draw, Font().bold, 14.0f, ImVec2(at.x + 12.0f, at.y + 7.0f), ready ? ColText : ColMuted, "Mortar barrage");
+            Put(draw, Font().bold, 14.0f, ImVec2(at.x + 12.0f, at.y + 7.0f), ready ? ColText : ColMuted, "Mortars");
             char line[96];
             if (b.cooldownLeft > 0.0f)
-                std::snprintf(line, sizeof(line), "%d rounds  -  reloading, %.0f s", b.shells, b.cooldownLeft);
+                std::snprintf(line, sizeof(line), "reloading, %.0f s", b.cooldownLeft);
             else
-                std::snprintf(line, sizeof(line), "%d rounds  -  %s", b.shells, s.targeting ? "click the target" : "ready");
+                std::snprintf(line, sizeof(line), "%d rounds, %s", b.shells, s.targeting && !s.targetAir ? "aim" : "ready");
             Put(draw, Font().body, 12.0f, ImVec2(at.x + 12.0f, at.y + 28.0f), ColMuted, line);
             std::snprintf(line, sizeof(line), "%.0f", b.cost);
             const ImVec2 ct = Measure(Font().display, 16.0f, line);
@@ -1686,15 +1767,60 @@ void DrawDeploy(const Snapshot& snap)
                 snap.war.pool[me] >= b.cost ? ColGood : ColBad, line);
             if (pressed)
             {
-                if (s.targeting)
+                if (s.targeting && !s.targetAir)
                     s.targeting = false;
                 else if (ready)
                 {
                     s.targeting = true;
+                    s.targetAir = false;
                     SetStatus("Click where the mortars should land. Right click cancels.", ColWarn);
                 }
                 else
                     SetStatus(b.cooldownLeft > 0.0f ? "The mortars are reloading." : "Not enough supplies for a barrage.", ColWarn);
+            }
+        }
+        ImGui::SameLine(0.0f, 10.0f);
+        {
+            // Air support: one plane, a tight stick of bombs exactly where it is called.
+            const AirStrikeInfo a = AirStrike();
+            const bool ready = a.cooldownLeft <= 0.0f && !a.inbound && snap.war.pool[me] >= a.cost;
+            const ImVec2 at = ImGui::GetCursorScreenPos();
+            const float w = 156.0f, h = 50.0f;
+            const bool pressed = ImGui::InvisibleButton("air", ImVec2(w, h));
+            const bool hovered = ImGui::IsItemHovered();
+            ImDrawList* draw = ImGui::GetWindowDrawList();
+            draw->AddRectFilled(at, ImVec2(at.x + w, at.y + h),
+                                s.targeting && s.targetAir ? WithAlpha(ColWarn, 0.25f)
+                                : ready ? (hovered ? IM_COL32(60, 78, 102, 255) : IM_COL32(38, 48, 64, 255))
+                                        : IM_COL32(30, 34, 42, 200),
+                                10.0f);
+            Put(draw, Font().bold, 14.0f, ImVec2(at.x + 12.0f, at.y + 7.0f), ready ? ColText : ColMuted, "Air strike");
+            char line[96];
+            if (a.inbound)
+                std::snprintf(line, sizeof(line), "plane inbound");
+            else if (a.cooldownLeft > 0.0f)
+                std::snprintf(line, sizeof(line), "rearming, %.0f s", a.cooldownLeft);
+            else
+                std::snprintf(line, sizeof(line), "%d bombs, %s", a.bombs, s.targeting && s.targetAir ? "aim" : "ready");
+            Put(draw, Font().body, 12.0f, ImVec2(at.x + 12.0f, at.y + 28.0f), ColMuted, line);
+            std::snprintf(line, sizeof(line), "%.0f", a.cost);
+            const ImVec2 ct = Measure(Font().display, 16.0f, line);
+            Put(draw, Font().display, 16.0f, ImVec2(at.x + w - ct.x - 10.0f, at.y + h - ct.y - 6.0f),
+                snap.war.pool[me] >= a.cost ? ColGood : ColBad, line);
+            if (pressed)
+            {
+                if (s.targeting && s.targetAir)
+                    s.targeting = s.targetAir = false;
+                else if (ready)
+                {
+                    s.targeting = true;
+                    s.targetAir = true;
+                    SetStatus("Click the target for the bombs. Right click cancels.", ColWarn);
+                }
+                else
+                    SetStatus(a.inbound ? "A plane is already on its way." : a.cooldownLeft > 0.0f ? "The plane is rearming."
+                                                                                                 : "Not enough supplies for an air strike.",
+                              ColWarn);
             }
         }
     }
@@ -1934,13 +2060,19 @@ void DrawSetup()
         Heading("YOUR SIDE");
         ImGui::Spacing();
         const std::vector<std::string> sides = SideNames();
+        const int optional = OptionalSide();
+        const auto takesPart = [&](size_t i) { return static_cast<int>(i) != optional || o.resistance; };
+        if (!takesPart(static_cast<size_t>(o.side)))
+            o.side = 0;
         for (size_t i = 0; i < sides.size(); i++)
         {
+            if (!takesPart(i))
+                continue;
             if (i)
                 ImGui::SameLine(0.0f, 12.0f);
             ImGui::PushID(static_cast<int>(i));
             const ImVec2 at = ImGui::GetCursorScreenPos();
-            const ImVec2 size(200.0f, 76.0f);
+            const ImVec2 size(o.resistance && optional != NoSide ? 170.0f : 200.0f, 76.0f);
             if (ImGui::InvisibleButton("side", size))
                 o.side = static_cast<int>(i);
             const bool chosen = o.side == static_cast<int>(i);
@@ -1968,6 +2100,27 @@ void DrawSetup()
             o.startInCommand = true;
             o.commanderView = true;
         }
+        ImGui::Spacing();
+        Heading("THE WAR");
+        ImGui::Spacing();
+        if (optional != NoSide)
+            ImGui::Checkbox("The Resistance fights too (a third side, from its own base)", &o.resistance);
+        const int towns = VictoryTownsMax(o.resistance);
+        o.victoryTowns = std::clamp(o.victoryTowns, 0, towns);
+        ImGui::SetNextItemWidth(260.0f);
+        ImGui::SliderInt("Villages to win", &o.victoryTowns, 0, towns,
+                         o.victoryTowns == 0 ? "off: the war score decides" : o.victoryTowns == towns ? "all %d" : "%d");
+        for (size_t i = 0; i < sides.size(); i++)
+        {
+            if (!takesPart(i))
+                continue;
+            ImGui::PushID(static_cast<int>(i) + 200);
+            ImGui::SetNextItemWidth(260.0f);
+            const std::string label = SideTitle(static_cast<int>(i)) + " supplies";
+            ImGui::SliderFloat(label.c_str(), &o.startPool[i], 0.0f, 5000.0f, "%.0f");
+            o.startPool[i] = std::round(o.startPool[i] / 50.0f) * 50.0f;
+            ImGui::PopID();
+        }
         ImGui::EndGroup();
         ImGui::SameLine(0.0f, 40.0f);
         ImGui::BeginGroup();
@@ -1978,7 +2131,7 @@ void DrawSetup()
         Label(Font().body, 13.0f, ColMuted, "Fog of war");
         if (ImGui::RadioButton("Contacts: enemies only as your side knows them", o.fog == FogMode::Contacts))
             o.fog = FogMode::Contacts;
-        if (ImGui::RadioButton("Shroud: unexplored ground stays black", o.fog == FogMode::Shroud))
+        if (ImGui::RadioButton("Shroud: unexplored ground stays black (top-down view only)", o.fog == FogMode::Shroud))
             o.fog = FogMode::Shroud;
         ImGui::Checkbox("Taking control of any of your soldiers", &o.possession);
         ImGui::Checkbox("HQ radios its orders", &o.hqRadio);
@@ -1987,6 +2140,8 @@ void DrawSetup()
         Label(Font().body, 12.0f, ColMuted, "An LLM sets the priorities; the standard AI does the rest.");
         for (size_t i = 0; i < sides.size(); i++)
         {
+            if (!takesPart(i))
+                continue;
             ImGui::PushID(static_cast<int>(i) + 100);
             bool llm = o.llmCommander[i];
             const std::string label = SideTitle(static_cast<int>(i)) + ": LLM commander (Hybrid)";
@@ -2016,6 +2171,108 @@ void DrawSetup()
         ImGui::SameLine(0.0f, 16.0f);
         if (ImGui::Button("AI & voice..."))
             s.voiceOpen = true;
+    }
+    ImGui::End();
+}
+
+// Multiplayer: the side's vote on its commander, while it runs.
+void DrawVote()
+{
+    const CommandSeat c = Seat();
+    if (!c.multiplayer || !c.vote)
+        return;
+    const ImGuiIO& io = ImGui::GetIO();
+    if (BeginPanel("##conquest_vote", ImVec2(io.DisplaySize.x * 0.5f, 72.0f), ImVec2(0.5f, 0.0f)))
+    {
+        const std::string q = c.voteCaller + " asks: remove " + c.voteTarget + " as commander?";
+        Label(Font().bold, 15.0f, ColWarn, q.c_str());
+        char line[160];
+        std::snprintf(line, sizeof(line), "%.0f s left  -  yes %d, no %d, of %d players  -  Ctrl+Y yes, Ctrl+N no%s",
+                      c.voteLeft, c.yes, c.no, c.electorate,
+                      c.myVote > 0 ? "  (you: yes)" : c.myVote < 0 ? "  (you: no)" : "");
+        Label(Font().body, 13.0f, ColMuted, line);
+        if (St().active)
+        {
+            if (ImGui::Button("Yes, remove"))
+                CastVote(true);
+            ImGui::SameLine(0.0f, 10.0f);
+            if (ImGui::Button("No, keep"))
+                CastVote(false);
+        }
+    }
+    ImGui::End();
+}
+
+void Notify(const std::string& text)
+{
+    if (St().active)
+        SetStatus(text, ColWarn);
+    else if (GWorld && GWorld->UI())
+        GWorld->UI()->ShowHint(RString(text.c_str()));
+}
+
+// After the war: who won and why; a new war, the menu, or a last look round.
+void DrawEnd(const Snapshot& snap)
+{
+    State& s = St();
+    if (snap.winner == NoSide)
+    {
+        s.endClosed = false;
+        s.endGrab = false;
+        return;
+    }
+    if (s.endClosed)
+        return;
+    if (!s.endGrab && GEngine)
+    {
+        GEngine->SetMouseGrab(false);
+        SDL_ShowCursor();
+        s.endGrab = true;
+    }
+    const ImGuiIO& io = ImGui::GetIO();
+    if (BeginPanel("##conquest_end", ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.4f), ImVec2(0.5f, 0.5f)))
+    {
+        const bool won = snap.winner == PlayerSide();
+        Label(Font().display, 34.0f, won ? ColGood : ColBad, won ? "VICTORY" : "DEFEAT");
+        const std::string why = SideTitle(snap.winner) + " wins the war: " + snap.winReason + ".";
+        Label(Font().body, 15.0f, ColText, why.c_str());
+        ImGui::Spacing();
+        for (int side = 0; side < snap.war.sideCount; side++)
+        {
+            char line[160];
+            std::snprintf(line, sizeof(line), "%s: holds %d, lost %d men, war score %.0f", SideTitle(side).c_str(),
+                          OwnedCount(snap.war, side), snap.losses[side], snap.war.score[side]);
+            Label(Font().body, 13.0f, SideColour(side), line);
+        }
+        Label(Font().body, 12.0f, ColMuted, "The result is written to conquest-history.txt in your profile.");
+        ImGui::Spacing();
+        ImGui::Spacing();
+        const bool single = !GWorld || GWorld->GetMode() != GModeNetware;
+        if (single && ImGui::Button("   New war   "))
+        {
+            if (Active())
+                SetActive(false);
+            if (NewWar())
+            {
+                s.endClosed = false;
+                s.endGrab = false;
+                s.setupGrab = true; // the mouse is already free for the setup screen
+            }
+        }
+        if (single)
+            ImGui::SameLine(0.0f, 12.0f);
+        if (ImGui::Button("   Main menu   "))
+            EndMission();
+        ImGui::SameLine(0.0f, 12.0f);
+        if (ImGui::Button("Look round"))
+        {
+            s.endClosed = true;
+            if (!s.active && GEngine)
+            {
+                GEngine->SetMouseGrab(true);
+                SDL_HideCursor();
+            }
+        }
     }
     ImGui::End();
 }
@@ -2337,11 +2594,29 @@ bool ProcessEvent(const SDL_Event& event)
     {
         if (s.active || (PlayerSide() != NoSide && GetOptions().commanderView))
         {
-            SetActive(!s.active);
+            std::string why;
+            if (!s.active && !CanTakeCommand(&why))
+                Notify(why); // one commander per side
+            else
+                SetActive(!s.active);
             s.consumeKeyboard = true;
             return true;
         }
         return false;
+    }
+    if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && (event.key.mod & SDL_KMOD_CTRL) != 0 &&
+        PlayerSide() != NoSide && Seat().multiplayer && !MenuOpen() &&
+        (event.key.scancode == SDL_SCANCODE_V || event.key.scancode == SDL_SCANCODE_Y || event.key.scancode == SDL_SCANCODE_N))
+    {
+        if (event.key.scancode == SDL_SCANCODE_V)
+        {
+            std::string why;
+            Notify(CallVote(&why) ? "You called a vote to replace the commander." : "No vote: " + why);
+        }
+        else if (CastVote(event.key.scancode == SDL_SCANCODE_Y))
+            Notify(event.key.scancode == SDL_SCANCODE_Y ? "You voted to remove the commander." : "You voted to keep the commander.");
+        s.consumeKeyboard = true;
+        return true;
     }
     if (!s.active)
         return false;
@@ -2529,6 +2804,13 @@ void Frame()
         PopTheme();
         return;
     }
+    // Voted out, or another player holds command: the view closes and says why.
+    if (std::string lost; TakeCommandLoss(lost))
+    {
+        if (s.active)
+            SetActive(false);
+        Notify(lost);
+    }
     // The war began in command, or the soldier the commander had taken over died: the view opens.
     if (std::string notice; TakeViewRequest(notice) && !s.active)
     {
@@ -2544,6 +2826,11 @@ void Frame()
         {
             CatchBanners(snap);
             DrawSoldierHud(snap);
+            DrawCommanderOnGround();
+            PushTheme();
+            DrawVote();
+            DrawEnd(snap);
+            PopTheme();
         }
         return;
     }
@@ -2593,6 +2880,8 @@ void Frame()
     DrawOptions();
     DrawVoicePanel();
     DrawToast();
+    DrawVote();
+    DrawEnd(snap);
     PopTheme();
 }
 } // namespace Poseidon::Conquest::View

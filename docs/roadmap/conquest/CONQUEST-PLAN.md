@@ -674,3 +674,62 @@ fill (a scripted spawn) rather than the war's own purchasing.
   moved (`Conquest::ArsenalTake`, called from `InventoryModel::CanTransfer` / `Transfer`). Checked through the
   inventory's own transfer (`conquestTestArsenalTake`): a magazine 400 -> 397, a weapon 397 -> 372, both refused at
   1 and 10 supplies. Multiplayer's classic Gear screen does not charge yet.
+
+### Status 2026-10-26 (later): the war's settings, the Resistance, every village, air support, multiplayer command
+
+- **Every village of Everon** is an objective now (18: the 7 before plus Regina, Durras, Vernon, Saint Pierre, Levie,
+  Laruns, Chotain, Provins, Le Moule, Lamentin, Meaux), linked into one front graph. Le Moule is the Resistance's
+  base. The objectives moved to each mission's `objectives.hpp`; `conquest.hpp` (the rules) is the same file in
+  every Conquest mission, and `Build-Conquest.ps1` stops if a copy drifts.
+- **The Resistance** (the game's third side, GUER; "Resistance" is its name in this game, flag `guba_vlajka.pac`) is
+  optional and off by default (`resistance = 0`). Off, its base is one more neutral village (`DropLastSide`). On,
+  it has its own rosters and vehicles (Ural, UAZ, BMP, Mi-17, T-55, Mi-24) and everyone is hostile to everyone.
+- **Setup screen, THE WAR:** the Resistance on/off, villages to win (0 = off, up to every village of the island:
+  `VictoryTownsMax`; `TownVictor` ends the war when a side holds that many), and each side's starting supplies
+  (0..5000). Saved with the game. `conquestStart` takes them too: `[side, start, fog, view, llm, resistance,
+  villages, [supplies]]`.
+- **Each side starts with a tank and a helicopter** (startSquads adds Armour and AirAssault).
+- **Commander personalities:** `<SIDE>personality` = balanced / aggressive / cautious sets the AI's starting posture
+  (WEST balanced, EAST aggressive, GUER cautious); the LLM commander may change it.
+- **The commanders use the artillery:** a Standard commander fires its mortars on a known cluster of enemies (3+,
+  a vehicle counts 2) at an objective it attacks or holds, never within 120 m of its own men, only with a rifle
+  squad's supplies to spare. The LLM commander can name an objective under `"barrage"`. Mortars now need an
+  objective of the side within `barrageRange` (4 km) and warn friendly squads within 300 m ("danger close").
+- **Air support** (owner, 2026-10-26): the SUPPORT panel's Air strike (and `conquestAirStrike [x, y]`): the side's
+  attack plane (A-10 / Su-25) with a pilot comes in from the side's nearest objective, over the point, and drops a
+  stick of 4 bombs 12 m apart along its track, aimed at the point (cost 400, 5 min rearming, one plane at a time).
+  It can be shot down before the drop. The AI commanders call it on armour or crowds when the mortars cannot.
+- **Plan leftovers done:** the end screen (VICTORY / DEFEAT, why, each side's holdings and losses; New war in single
+  player, which clears the island and opens the setup screen again; Main menu; Look round), the war history
+  (`conquest-history.txt` in the profile, one line per war), capture weights (a crewed armoured vehicle counts 3,
+  anything more than 30 m up counts 0), the purchase queue (a purchase the side cannot make yet waits up to 2
+  minutes and deploys when it can; HQ radios when it does or is cancelled).
+- **One commander per side** (multiplayer): the first player to open the command view holds command; another gets
+  "X commands WEST. Ctrl+V calls a vote to replace them." Ctrl+V calls a vote, Ctrl+Y / Ctrl+N vote (60 s; a
+  majority of the side's players removes the commander, who fights on as a soldier and may not take command for
+  5 minutes). The vote shows as a card in both views.
+- **Human players in the command view** carry a white badge (head in a ring) over their symbol and "PLAYER" on the
+  squad label; a squad a human leads is never moved by the commander: the order reaches it as HQ's request (order
+  card and radio). A human player's soldier cannot be taken over.
+- **The commander's mark:** a small gold star over the commander's soldier, for his side only, within 300 m, fading
+  with distance (and in the command view). A different uniform is not possible: a live soldier's model cannot be
+  swapped without replacing him.
+- **Slice 5, other islands:** `objectives = "auto"` makes the war from the island's own town list (CfgWorlds Names,
+  villages and up; `AutoObjectives`: HQs as far apart as possible, each town linked to its 3 nearest within 2.5 km
+  plus a spanning tree so nothing is cut off). Missions for Malden (Abel), Kolgujev (Cain) and Nogova (Noe) are in
+  the Single Missions list; the CONQUEST menu entry still opens Everon. The spectator body is moved off the
+  battlefield (land, 600 m from every objective, near the player's HQ) before the setup screen.
+- **Squads awaiting orders hold still** (owner: "do not let them run around like chickens"): while a human commands
+  the side, the AI planner moves none of its squads; a squad without an order is told once to stand where it is,
+  in formation round its leader; a bought squad waits where it deployed; the human's orders no longer run out
+  after 10 minutes while he commands. The AI takes the squads back only when nobody commands the side.
+- **Air support is a real plane:** the bombs are the plane's own shots, released from it over the target. Shot down
+  (or its pilot killed) before the target, nothing drops and HQ radios "Air support lost".
+- **The shroud is never the default** and is a top-down overlay only: it fades out as the command camera comes down
+  and is not drawn near the ground (the minimap keeps it). The tests use the default fog of war; the shroud gets
+  one capture from 4 km up.
+- **Checked:** `PoseidonTests "[conquest]"` (23 cases); `scripts/Test-ConquestFeatures.ps1`, five runs, all checks
+  passed: deaths carry the player on, the Resistance out by default and in on request, the command view,
+  mortars, the air strike dropping on its point, a plane shot down dropping nothing, one plane at a time,
+  Malden's war made from its 14 towns (HQs Goisse, Le Port, and La Riviere for the Resistance). Not checked: the vote and the one-commander rule in a real multiplayer game (the harness
+  refuses commands in multiplayer), the end screen's New war by hand.
