@@ -255,6 +255,7 @@ foreach ($pack in @(
     @{Folder='assets/Mods/@OP_VisualUpgrade'; Archive='op_ground_materials.pbo'; Source='visual'; Builder='Build-DefaultContent.ps1'},
     @{Folder='assets/Mods/@OP_VehicleActions'; Archive='op_jeep_actions.pbo'; Source='vehicle-actions'; Builder='Build-VehicleActions.ps1'},
     @{Folder='assets/Mods/@OP_Swim'; Archive='swim.pbo'; Source='swim'; Builder='Build-Swim.ps1'},
+    @{Folder='assets/Mods/@OP_Conquest'; Archive='op_conquest.pbo'; Source='conquest'; Builder='Build-Conquest.ps1'},
     @{Folder='assets/Mods/@OP_TidewaterBoat'; Archive='op_tidewater_boat.pbo'; Source='tidewater-boat'; Builder='Build-TidewaterBoat.ps1'},
     @{Folder='assets/Mods/@OP_TidewaterWildlife'; Archive='op_tidewater_wildlife.pbo'; Source='tidewater-wildlife'; Builder='Build-TidewaterWildlife.ps1'})) {
     $relocatedPacks += ($pack.Folder -replace '^assets/', '')

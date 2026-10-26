@@ -9,7 +9,7 @@
 // move paths. It also counts losses, cleans up old bodies and keeps the map markers current.
 //
 // Inert unless the mission's description.ext declares `class CfgConquest` (see
-// dev-missions/conquest-everon.Eden). Single player only for now; not saved yet (Slice 1).
+// content/default-packs/conquest/missions/conquest-everon.Eden). Single player only for now; not saved yet (Slice 1).
 
 #include <Poseidon/Game/Conquest/ConquestCommander.hpp>
 #include <Poseidon/Game/Conquest/ConquestRules.hpp>

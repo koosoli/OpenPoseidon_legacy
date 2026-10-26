@@ -522,3 +522,17 @@ At the owner's request (2026-10-25/26), ahead of the slice order:
   not stalled: before, squads fighting outside a held town were re-tasked into the same fight again and again.
   Second, the AI no longer buys the 4-man recon jeep (`ai = 0`); before, 24 of 32 AI purchases were jeeps. Every war
   ended, and the live cap held. Balance is not established yet: over all five runs, WEST won 3 and EAST 2.
+
+## Status, 2026-10-26: playable from the main menu
+
+- **Start as a soldier** (`startAs = "soldier"` in CfgConquest, with `possession` on; the default, `"commander"`,
+  keeps the captive observer at Le Moule). When the war begins, the player takes over the first squad of their side;
+  Ctrl+M opens the commander view, and a soldier killed goes back to command, from where another squad can be taken.
+- **A soldier's HUD** while the commander view is closed: a war bar (both scores, objectives held, the clock), a card
+  for the zone the player stands in with its capture progress, and banners for captures, losses and purchases.
+  It hides whenever a menu, the map dialog or the pause screen is up (`World::IsSimulationEnabled()`;
+  `GWorld->GetOptions()` is the main display and is set during play, so it cannot tell).
+- **Shipped as a default content pack, `@OP_Conquest`** (`content/default-packs/conquest`, built by
+  `scripts/Build-Conquest.ps1` from `Build-DefaultContent.ps1`, installed by `Deploy.ps1`). It carries the
+  `op_conquest` addon and the mission in `Missions\OpenPoseidon\conquest-everon.Eden`, which moved there from
+  `dev-missions/`. The main menu has a **CONQUEST** entry that starts it; without the pack it says so.

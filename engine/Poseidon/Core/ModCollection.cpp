@@ -398,6 +398,7 @@ DefaultContentResolveResult ResolveDefaultContentPacks(const std::string& gameDi
     static constexpr Pack packs[] = {{"@OP_VisualUpgrade", "op_ground_materials.pbo", true},
                                      {"@OP_VehicleActions", "op_jeep_actions.pbo", true},
                                      {"@OP_Swim", "swim.pbo", true}, // Sinkhole W3: swim moves (SWIM-W3-001)
+                                     {"@OP_Conquest", "op_conquest.pbo", true}, // Conquest's wars (Game/Conquest)
                                      {"@OP_TidewaterBoat", "op_tidewater_boat.pbo", true}, // Tidewater's lobster boat
                                      {"@OP_TidewaterWildlife", "op_tidewater_wildlife.pbo", true}, // Tidewater's humpback
                                      {"@OP_Fusion", "fusion_ofp.pbo", false},

@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Runs the worktree's dist build against the game data (nothing is deployed) on
-    dev-missions/conquest-everon.Eden, speeds time up, and every PollSeconds of real time asks the
+    content/default-packs/conquest/missions/conquest-everon.Eden, speeds time up, and every PollSeconds of real time asks the
     referee for `conquestState` and the game clock through the harness. Writes:
       * state.jsonl  - one line per poll: real seconds, game seconds, the referee's status line;
       * map-*.png    - the in-game map (objectives in their owner's colour) at intervals;
@@ -49,7 +49,7 @@ $env:POSEIDON_USER_DIR = Join-Path $out 'user'
 New-Item -ItemType Directory -Force $env:POSEIDON_USER_DIR | Out-Null
 [IO.File]::WriteAllLines((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'), @('qualityPreset=1;', 'dlssMode=0;', 'vsync=0;', 'fpsCap=60;'))
 if ($Seed) { $env:POSEIDON_RNG_SEED = "$Seed" }
-$mission = Join-Path $root 'dev-missions/conquest-everon.Eden'
+$mission = Join-Path $root 'content/default-packs/conquest/missions/conquest-everon.Eden'
 $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
 $listener.Start(); $port = $listener.LocalEndpoint.Port; $listener.Stop()
 $log = Join-Path $out 'engine.log'

@@ -13,4 +13,7 @@ inline constexpr int IslandEditorMenuId = 62200;
 /// Starts PoseidonIslandEditor.exe from beside the running executable, pointed at the game folder.
 /// The game keeps running. Returns false with `error` set when it cannot.
 bool LaunchIslandEditor(std::string& error);
+
+/// Main menu "CONQUEST": starts the Everon war from the @OP_Conquest pack (Missions\OpenPoseidon).
+inline constexpr int ConquestMenuId = 62300;
 } // namespace Poseidon

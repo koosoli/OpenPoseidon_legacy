@@ -1,13 +1,16 @@
-# Conquest on Everon (Slice 0 dev mission)
+# Conquest on Everon
 
-An NPC-only war between WEST (HQ Morton) and EAST (HQ the airfield) over Figari, Entre Deux,
+A war between WEST (HQ Morton) and EAST (HQ the airfield) over Figari, Entre Deux,
 Montignac, Gravette and Tyrone. The engine's Conquest referee (`engine/Poseidon/Game/Conquest`)
 reads `class CfgConquest` in `description.ext`; everything else (squads, orders, captures,
-purchases, cleanup, map markers) is the referee's work. The player is a captive, invulnerable
-spectator at Le Moule.
+purchases, cleanup, map markers) is the referee's work. The player starts as a WEST squad leader
+(`startAs = "soldier"`); Ctrl+M opens the commander view.
+
+It ships in the `@OP_Conquest` content pack (`Missions\OpenPoseidon`), started by the main menu's
+CONQUEST entry. From the repository:
 
 ```text
---window --test-mission <repository>/dev-missions/conquest-everon.Eden --log-file <log>
+--window --test-mission <repository>/content/default-packs/conquest/missions/conquest-everon.Eden --log-file <log>
 ```
 
 - Map (M): one ellipse per objective in its owner's colour, labelled with capture progress.

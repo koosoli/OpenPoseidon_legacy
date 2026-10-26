@@ -383,6 +383,8 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
     static ParamFile mapButtonResource, worldButtonResource;
     injectEntry(mapButtonResource, "LocalMapsButton", LocalMapsMenuId, "ARMA CONTENT");
     injectEntry(worldButtonResource, "WholeWorldButton", WholeWorldMenuId, "WHOLE WORLD");
+    static ParamFile conquestButtonResource;
+    injectEntry(conquestButtonResource, "ConquestButton", ConquestMenuId, "CONQUEST");
 #ifdef _WIN32
     static ParamFile islandEditorButtonResource;
     injectEntry(islandEditorButtonResource, "IslandEditorButton", IslandEditorMenuId, "ISLAND EDITOR");
@@ -2429,6 +2431,31 @@ void DisplayMain::OnButtonClicked(int idc)
 {
     if (idc == LocalMapsMenuId) { CreateChild(CreateLocalMapsDisplay(this)); return; }
     if (idc == WholeWorldMenuId) { CreateChild(CreateWholeWorldDisplay(this)); return; }
+    if (idc == ConquestMenuId)
+    {
+        // The single-mission launch (IDD_SINGLE_MISSION below), for the one war @OP_Conquest ships.
+        const RString mission("conquest-everon.Eden");
+        const RString dir = ResolveSPMissionSubdir("OpenPoseidon\\", mission);
+        if (!std::filesystem::exists(std::string((const char*)(dir + mission + RString("\\mission.sqm")))))
+        {
+            CreateMsgBox(MB_BUTTON_OK, RString("Conquest is not installed: its content pack (assets\\Mods\\@OP_Conquest) "
+                                               "is missing or disabled."));
+            return;
+        }
+        CurrentTemplate.Clear();
+        if (GWorld->UI())
+            GWorld->UI()->Init();
+        CurrentCampaign = "";
+        CurrentBattle = "";
+        CurrentMission = "";
+        SetCampaign("");
+        if (!ProcessTemplateName(mission, dir))
+            return;
+        GStats.ClearAll();
+        ApplyCurrentMissionViewDistance();
+        CreateChild(new DisplayIntro(this));
+        return;
+    }
     if (_arma3)
     {
         const char* message = nullptr;

@@ -33,7 +33,7 @@ void DrawConquestTab()
     if (!s.active)
     {
         ImGui::TextWrapped("No Conquest war running. A mission turns the mode on with class CfgConquest in its "
-                           "description.ext (see dev-missions/conquest-everon.Eden).");
+                           "description.ext (see content/default-packs/conquest/missions/conquest-everon.Eden).");
         return;
     }
     const int t = static_cast<int>(s.now);
