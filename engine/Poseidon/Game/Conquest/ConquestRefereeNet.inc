@@ -102,6 +102,7 @@ void Publish(Referee& r, float now)
         ea.Add(GameValue(r.war.defs[o].x));
         ea.Add(GameValue(r.war.defs[o].y));
         ea.Add(GameValueExt(static_cast<Object*>(r.posts[o].flag.GetLink())));
+        // index 8 and 9 (after `why`): the arsenal box and whose it is, for the clients' Gear screen
         // Why each side may not deploy here now ("" when it may): the client's deploy panel.
         GameValue why = NetArray();
         GameArrayType& wa = why;
@@ -112,6 +113,9 @@ void Publish(Referee& r, float now)
             wa.Add(GameValue(RString(reason.c_str())));
         }
         ea.Add(why);
+        ea.Add(GameValueExt(static_cast<Object*>(r.posts[o].arsenal.GetLink())));
+        ea.Add(GameValue(static_cast<float>(r.posts[o].arsenalSide)));
+        ea.Add(GameValue(s.stock));
         oa.Add(e);
     }
     a.Add(objectives);
@@ -128,7 +132,7 @@ void Publish(Referee& r, float now)
         ea.Add(GameValue(static_cast<float>(r.live[s])));
         ea.Add(GameValue(static_cast<float>(r.losses[s])));
         ea.Add(GameValue(static_cast<float>(r.bought[s])));
-        ea.Add(GameValue(std::max(0.0f, r.lastBarrage[s] + r.config.barrageCooldown - now)));
+        ea.Add(GameValue(std::max({0.0f, r.lastBarrage[s] + r.config.barrageCooldown - now, SupportWait(r, now)})));
         ea.Add(GameValue(now < r.humanUntil[s]));
         // who commands, and the vote on it
         Person* holder = now < r.humanUntil[s] ? r.seat[s].GetLink() : nullptr;
@@ -145,7 +149,7 @@ void Publish(Referee& r, float now)
         va.Add(GameValue(RString(v.targetName.c_str())));
         va.Add(GameValue(RString(v.callerName.c_str())));
         ea.Add(vote);
-        ea.Add(GameValue(std::max(0.0f, r.lastAir[s] + r.config.airCooldown - now)));
+        ea.Add(GameValue(std::max({0.0f, r.lastAir[s] + r.config.airCooldown - now, SupportWait(r, now)})));
         ea.Add(GameValue(std::any_of(r.strikes.begin(), r.strikes.end(), [s](const Strike& k) { return k.side == s; })));
         sa.Add(e);
     }
@@ -173,6 +177,7 @@ void Publish(Referee& r, float now)
         ea.Add(GameValue(RString(rec.hqText.c_str())));
         ea.Add(GameValue(rec.hqX));
         ea.Add(GameValue(rec.hqY));
+        ea.Add(GameValue(RString(Doing(r, rec).c_str())));
         ga.Add(e);
     }
     a.Add(groups);
@@ -223,6 +228,8 @@ void Publish(Referee& r, float now)
 
     a.Add(GameValue(static_cast<float>(r.winner)));
     a.Add(GameValue(RString(r.winReason.c_str())));
+    a.Add(GameValue(r.options.resistanceAlly));
+    a.Add(GameValue(TimeLeft()));
 
     gs->VarSet("conquestNet", root);
     GetNetworkManager().PublicVariable("conquestNet");
@@ -282,6 +289,12 @@ void ReadNet(Referee& r)
         r.winner = static_cast<int>(Num(a, 10, NoSide));
         r.winReason = Str(a, 11);
     }
+    if (a.Size() > 13)
+    {
+        r.options.resistanceAlly = Flag(a, 12);
+        ApplyAlliance(r);
+        r.netTimeLeft = Num(a, 13, -1.0f);
+    }
 
     const GameArrayType& oa = a[4];
     for (int o = 0; o < oa.Size() && o < static_cast<int>(r.war.defs.size()); o++)
@@ -297,6 +310,12 @@ void ReadNet(Referee& r)
         if (e.Size() > 6)
             r.posts[o].flag = dyn_cast<EntityAI>(GetObject(e[6]));
         r.spawnWhy[o].fill(std::string());
+        if (e.Size() > 9)
+        {
+            r.posts[o].arsenal = dyn_cast<EntityAI>(GetObject(e[8]));
+            r.posts[o].arsenalSide = static_cast<int>(Num(e, 9, -2));
+        }
+        s.stock = Num(e, 10, 0.0f);
         if (e.Size() > 7 && e[7].GetType() == GameArray)
         {
             const GameArrayType& wa = e[7];
@@ -358,6 +377,7 @@ void ReadNet(Referee& r)
         rec.hqText = Str(e, 10);
         rec.hqX = Num(e, 11);
         rec.hqY = Num(e, 12);
+        rec.netDoing = Str(e, 13);
         if (rec.group)
             r.groups.push_back(rec);
     }

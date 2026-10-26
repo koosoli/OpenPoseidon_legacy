@@ -130,6 +130,19 @@ TEST_CASE("conquest: capture speed follows the margin, not the head count", "[co
     CHECK(c.states[1].level > a.states[1].level);
 }
 
+TEST_CASE("conquest: a base's supplies are lost when it changes hands", "[conquest]")
+{
+    War war = LineWar();
+    float now = 0.0f;
+    Hold(war, 1, Men(8, 0), 60.0f, now); // side 0 takes A
+    REQUIRE(war.states[1].owner == 0);
+    war.states[1].stock = 250.0f;
+    war.states[2].owner = 1; // side 1 holds B, next to A: A is on its front
+    Hold(war, 1, Men(0, 8), 60.0f, now); // side 1 neutralises it
+    CHECK(war.states[1].owner == NoSide);
+    CHECK(war.states[1].stock == 0.0f);
+}
+
 TEST_CASE("conquest: abandoned progress decays back", "[conquest]")
 {
     War war = LineWar();
@@ -213,6 +226,41 @@ TEST_CASE("conquest: a third side left out becomes neutral ground", "[conquest]"
     CHECK(TownCount(war) == 3);
     DropLastSide(war, Tuning(), 300.0f); // never below two
     CHECK(war.sideCount == 2);
+}
+
+TEST_CASE("conquest: allies neither attack nor neutralise each other, and win together", "[conquest]")
+{
+    War war = LineWar();
+    war.sideCount = 3;
+    war.defs[2].kind = ObjectiveKind::HQ; // B: the third side's base, next to A
+    war.defs[2].initialOwner = 2;
+    StartWar(war, Tuning(), 300.0f);
+    war.states[1].owner = 0; // A is side 0's, next to the ally's base
+    war.allied[0][2] = war.allied[2][0] = true;
+    CHECK(Allied(war, 0, 2));
+    CHECK_FALSE(Allied(war, 0, 1));
+    CHECK_FALSE(CanAttack(war, 2, 1)); // the ally's town
+    CHECK(CanAttack(war, 1, 3));       // C is on side 1's own front
+    // The ally alone in side 0's town: it stays side 0's.
+    float now = 0.0f;
+    Presence ally;
+    ally.strength[2] = 8.0f;
+    Hold(war, 1, ally, 120.0f, now);
+    CHECK(war.states[1].owner == 0);
+    // Side 1 defeated: only allies are left, and the war is over.
+    war.defeated[1] = true;
+    CHECK(StepEconomy(war, 1.0f, Tuning()) != NoSide);
+}
+
+TEST_CASE("conquest: the time limit gives the war to the higher score", "[conquest]")
+{
+    War war = LineWar();
+    war.score[0] = 320.0f;
+    war.score[1] = 410.0f;
+    CHECK(ScoreLeader(war) == 1);
+    war.score[0] = 410.0f;
+    war.states[1].owner = 0; // a tie: more objectives decides
+    CHECK(ScoreLeader(war) == 0);
 }
 
 TEST_CASE("conquest: a war generated from an island's town list", "[conquest]")
@@ -372,6 +420,30 @@ TEST_CASE("conquest commander: a captured objective keeps one garrison, the rest
             attackingB++;
     }
     CHECK(attackingB == 2);
+}
+
+TEST_CASE("conquest commander: a rear objective keeps no garrison", "[conquest]")
+{
+    War war = LineWar();
+    for (int i : {1, 2}) // side 0 holds A and B: B is the front, A has only own neighbours
+    {
+        war.states[i].owner = 0;
+        war.states[i].holder = 0;
+        war.states[i].level = 1.0f;
+    }
+    SideView v = ViewOf(war, 0);
+    v.groups.push_back({1, 1000.0f, 0.0f, 8, TaskKind::Defend, 1, false}); // guarding A, in the rear
+    v.groups.push_back({2, 2000.0f, 0.0f, 8, TaskKind::Defend, 2, false}); // guarding B, on the front
+    bool rearFreed = false, frontKept = true;
+    for (const Intent& i : PlanStandard(v, CommanderTuning()))
+    {
+        if (i.kind == Intent::Kind::Assign && i.group == 1 && i.task == TaskKind::Attack)
+            rearFreed = true;
+        if (i.kind == Intent::Kind::Assign && i.group == 2)
+            frontKept = false;
+    }
+    CHECK(rearFreed);
+    CHECK(frontKept);
 }
 
 TEST_CASE("conquest commander: spare squads spread over the front instead of one column", "[conquest]")

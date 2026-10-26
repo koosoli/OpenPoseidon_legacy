@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Conquest's LLM commander and HQ conversation, against a local stand-in model (no API key, no cost).
 
@@ -113,7 +113,9 @@ Invoke-Case 'good' 'good' {
     Check ((Eval 'conquestStart ["WEST", "soldier", "contacts", "noview", ["EAST"]]') -eq 'true') 'good: the war starts with an LLM commander for EAST'
     $null = Eval 'setAccTime 4'
     Check (WaitFor 'EAST LLM commander \([0-9]+ s, attack\): Tyrone first' 60) 'good: the model''s plan is applied (posture attack, its reason in the log)'
-    Check (WaitFor 'EAST group [0-9]+: attack Tyrone \(main effort\)' 90) 'good: Tyrone becomes EAST''s main effort'
+    # Squads may already be on their way to Tyrone: the one the plan adds is "reinforcing the main effort".
+    Check (WaitFor 'EAST group [0-9]+: attack Tyrone \((main effort|reinforcing the main effort)\)' 90) 'good: Tyrone becomes EAST''s main effort'
+    Check (WaitFor 'EAST HQ situation report: We hold the airfield' 30) 'good: the commander radios its situation report'
     Check (WaitFor 'EAST bought a Motorised squad' 150) 'good: the purchase the model asked for is made'
     # The next request (after about four game minutes) carries the commander's memory.
     $deadline = [DateTime]::UtcNow.AddSeconds(150)

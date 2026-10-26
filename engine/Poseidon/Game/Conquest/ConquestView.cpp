@@ -65,7 +65,7 @@ namespace
 constexpr float Pi = 3.14159265f;
 constexpr float PickPixels = 20.0f;
 constexpr float MinDistance = 3.0f;       // down among the soldiers
-constexpr float MaxDistance = 3500.0f;
+constexpr float MaxDistance = 9000.0f; // the whole island (12.8 km) in view; owner 2026-10-26: "zoom out further"
 constexpr float FollowMinDistance = 2.2f; // a followed soldier: close, never inside him
 constexpr float MinPitch = 2.0f;          // degrees: the camera can come down to the ground
 constexpr float MaxPitch = 88.0f;
@@ -194,6 +194,8 @@ struct State
     bool dragPan = false;    // Ctrl + left drag moves the view
     bool targeting = false;  // the next left click places the mortar barrage
     bool targetAir = false;  // ... or the air strike
+    bool targetEngage = false; // ... or the selected squads' target (Engage)
+    int baseInfo = -1;         // the base whose command tent was clicked: its card
     bool optionsOpen = false;
     bool deployOpen = false; // the DEPLOY / SUPPORT panel (B, or the top bar's Deploy)
     bool helpOpen = false;   // the controls row (H)
@@ -572,8 +574,25 @@ void ClickSelect(float x, float y, bool add)
     }
     if (!add)
         s.selected.clear();
+    s.baseInfo = -1;
     if (!best)
     {
+        // Not a soldier: a base's command tent opens its card (supplies, deploy, a supply truck).
+        const Snapshot& snap = GetSnapshot();
+        float bestBase = 30.0f * 30.0f;
+        for (size_t o = 0; o < snap.war.defs.size(); o++)
+        {
+            const ObjectiveDef& d = snap.war.defs[o];
+            ScreenPoint p;
+            if (!Project(Vector3(d.x, Ground(d.x, d.y) + 1.5f, d.y), p))
+                continue;
+            const float d2 = (p.x - x) * (p.x - x) + (p.y - y) * (p.y - y);
+            if (d2 < bestBase)
+            {
+                bestBase = d2;
+                s.baseInfo = static_cast<int>(o);
+            }
+        }
         if (!add)
         {
             s.unit = nullptr;
@@ -592,6 +611,24 @@ void ClickSelect(float x, float y, bool add)
         s.follow = const_cast<Transport*>(vehicle);
     if (s.follow && s.distance > 120.0f)
         s.distance = 120.0f; // come down to the soldier picked
+}
+
+// The view on the player's own soldier (C, or the command bar's Me): centred and followed; the
+// vehicle he sits in when he is in one. Moving the view lets go, as with any followed soldier.
+void CenterOnMe()
+{
+    State& s = St();
+    Person* me = GWorld ? GWorld->GetRealPlayer() : nullptr;
+    if (!me || me->IsDammageDestroyed())
+    {
+        SetStatus("You have no soldier on the ground.", ColWarn);
+        return;
+    }
+    AIUnit* unit = me->Brain();
+    s.follow = unit && unit->GetVehicleIn() ? static_cast<EntityAI*>(unit->GetVehicleIn()) : static_cast<EntityAI*>(me);
+    s.unit = nullptr;
+    s.distance = std::min(s.distance, 120.0f);
+    SetStatus("Following you. Move the view to let go.");
 }
 
 void BoxSelect(float x0, float y0, float x1, float y1, bool add)
@@ -661,6 +698,19 @@ void FireBarrageAt(float uiX, float uiY)
     if (!GroundAt(uiX, uiY, x, y))
         return;
     std::string why;
+    if (s.targetEngage)
+    {
+        s.targetEngage = false;
+        const std::string what = EngageAt(s.selected, x, y);
+        if (what.empty())
+            SetStatus("Nothing to engage there: they fire at will.", ColWarn);
+        else
+        {
+            s.flashes.push_back({x, y, SDL_GetTicks()});
+            SetStatus("Engaging " + what + ".", ColWarn);
+        }
+        return;
+    }
     if (s.targetAir)
     {
         s.targetAir = false;
@@ -703,6 +753,11 @@ const char* Task(const LiveGroup& g, const Snapshot& snap, std::string& buffer)
 {
     if (g.playerLed)
         return "You are leading this squad";
+    if (!g.doing.empty())
+    {
+        buffer = g.doing; // the referee's words: "Supply run to Figari (300)", "Engaging Zelt"
+        return buffer.c_str();
+    }
     if (g.stalled)
         return "Held up, finding another way";
     const bool onObjective = g.objective >= 0 && g.objective < static_cast<int>(snap.war.defs.size());
@@ -1040,23 +1095,30 @@ void DrawSquads(ImDrawList* draw, const std::vector<SquadDraw>& squads)
     {
         const bool sel = IsSelected(d.group.id);
         const ImU32 colour = SquadShade(d.group.side, d.group.id);
-        if (sel && d.group.task != TaskKind::None && d.leaderVisible)
+        if (sel && d.group.hasDest)
         {
-            // Where it was sent: a dashed line from the squad to its destination.
-            ScreenPoint dest;
-            if (Project(Vector3(d.group.destX, Ground(d.group.destX, d.group.destY) + 1.0f, d.group.destY), dest))
+            // Where it is going: a dashed line over the ground from the squad to its destination. Drawn
+            // in steps, each projected on its own, so it shows even when one end is behind the camera or
+            // off the screen (the old single line needed both ends in view and often drew nothing).
+            const float x0 = d.worldX, y0 = d.worldY, x1 = d.group.destX, y1 = d.group.destY;
+            const float length = std::hypot(x1 - x0, y1 - y0);
+            const int steps = std::clamp(static_cast<int>(length / 25.0f), 1, 160);
+            ScreenPoint prev;
+            bool prevOk = false;
+            for (int i = 0; i <= steps; i++)
             {
-                const float dx = dest.x - d.leader.x, dy = dest.y - d.leader.y;
-                const float len = std::sqrt(dx * dx + dy * dy);
-                for (float t = 0.0f; t < len; t += 14.0f)
-                {
-                    const float t1 = std::min(t + 8.0f, len);
-                    draw->AddLine(ImVec2(d.leader.x + dx * t / len, d.leader.y + dy * t / len),
-                                  ImVec2(d.leader.x + dx * t1 / len, d.leader.y + dy * t1 / len), WithAlpha(colour, 0.8f),
-                                  2.0f);
-                }
-                draw->AddCircle(ImVec2(dest.x, dest.y), 7.0f, colour, 16, 2.0f);
+                const float t = static_cast<float>(i) / static_cast<float>(steps);
+                const float x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t;
+                ScreenPoint p;
+                const bool ok = Project(Vector3(x, Ground(x, y) + 1.0f, y), p);
+                if (ok && prevOk && i % 2 == 1)
+                    draw->AddLine(ImVec2(prev.x, prev.y), ImVec2(p.x, p.y), WithAlpha(colour, 0.85f), 2.0f);
+                prev = p;
+                prevOk = ok;
             }
+            ScreenPoint dest;
+            if (Project(Vector3(x1, Ground(x1, y1) + 1.0f, y1), dest))
+                draw->AddCircle(ImVec2(dest.x, dest.y), 7.0f, colour, 16, 2.0f);
         }
         for (size_t i = 0; i < d.vehicles.size(); i++)
             DrawSymbol(draw, ImVec2(d.vehicles[i].x, d.vehicles[i].y), 10.0f, ArmOf(d.vehicleObjects[i]), false, colour,
@@ -1289,10 +1351,12 @@ void DrawTopBar(const Snapshot& snap)
             ImGui::EndGroup();
         }
 
-        const int clock = static_cast<int>(snap.now);
+        // Under a time limit the clock counts down what is left of the war.
+        const float left = TimeLeft();
+        const int clock = static_cast<int>(left >= 0.0f ? left : snap.now);
         ImGui::SameLine(0.0f, 26.0f);
         std::snprintf(buf, sizeof(buf), "%d:%02d:%02d", clock / 3600, (clock / 60) % 60, clock % 60);
-        Stat("WAR TIME", buf);
+        Stat(left >= 0.0f ? "TIME LEFT" : "WAR TIME", buf);
         ImGui::SameLine(0.0f, 22.0f);
         ImGui::BeginGroup();
         Label(Font().body, 12.0f, ColMuted, " ");
@@ -1684,6 +1748,18 @@ void DrawDeploy(const Snapshot& snap)
         const bool open = CanBuy(s.deployBase, 0, &why) || why == "not enough supplies" || why == "manpower cap reached";
         const std::string where = snap.war.defs[s.deployBase].name + (open ? "  -  ready" : "  -  " + why);
         Label(Font().body, 13.0f, open ? ColGood : ColWarn, where.c_str());
+        // What deploying here spends: the side's pool at the HQ, this base's own stock elsewhere (supply trucks
+        // bring it from the HQ).
+        {
+            const bool hq = snap.war.defs[s.deployBase].kind == ObjectiveKind::HQ;
+            char line[128];
+            if (hq)
+                std::snprintf(line, sizeof(line), "HQ: spends the side's supplies (%.0f)", snap.war.pool[me]);
+            else
+                std::snprintf(line, sizeof(line), "Supplies at this base: %.0f  (supply trucks bring more from the HQ)",
+                              snap.war.states[s.deployBase].stock);
+            Label(Font().body, 12.0f, ColMuted, line);
+        }
         ImGui::Spacing();
 
         // The squads to buy, as tiles.
@@ -1892,6 +1968,52 @@ void KeyField(const char* id, const std::string& slot)
     ImGui::PopID();
 }
 
+// A model chosen from the provider's own list (loaded by its Check), or typed. "" = the default.
+bool ModelPicker(const char* id, std::string& value, const std::string& fallback,
+                 const std::vector<NpcChat::ModelInfo>& offered, bool chatOnly)
+{
+    bool changed = false;
+    ImGui::PushID(id);
+    const std::string current = value.empty() ? fallback : value;
+    ImGui::SetNextItemWidth(250.0f);
+    if (ImGui::BeginCombo("Model", current.empty() ? "(load the list: Check)" : current.c_str()))
+    {
+        if (ImGui::Selectable(("Default: " + fallback).c_str(), value.empty()))
+        {
+            value.clear();
+            changed = true;
+        }
+        for (const NpcChat::ModelInfo& m : offered)
+        {
+            if (chatOnly && !m.chat)
+                continue;
+            std::string label = m.id + (m.free ? "   [free]" : "");
+            if (!m.name.empty() && m.name != m.id)
+                label += "   " + m.name;
+            if (ImGui::Selectable(label.c_str(), m.id == current))
+            {
+                value = m.id;
+                changed = true;
+            }
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled(offered.empty() ? "list not loaded" : "%zu offered", offered.size());
+    ImGui::PopID();
+    return changed;
+}
+
+void StatusRow(const char* id, const NpcChat::LinkStatus& status, void (*check)())
+{
+    if (ImGui::Button(id))
+        check();
+    ImGui::SameLine();
+    Label(Font().body, 13.0f, LinkColour(status), LinkWord(status));
+    if (status.state == NpcChat::LinkState::Failed && !status.message.empty())
+        Label(Font().body, 12.0f, ColWarn, status.message.substr(0, 110).c_str());
+}
+
 void DrawVoicePanel()
 {
     State& s = St();
@@ -1908,25 +2030,49 @@ void DrawVoicePanel()
             Label(Font().body, 13.0f, ColWarn, "Talking to HQ is single player only; the LLM commander runs on the server.");
         ImGui::Spacing();
         // The settings scroll; Close stays in view at any window height.
-        ImGui::BeginChild("##voice_settings", ImVec2(520.0f, std::min(470.0f, io.DisplaySize.y - 190.0f)));
+        ImGui::BeginChild("##voice_settings", ImVec2(560.0f, std::min(480.0f, io.DisplaySize.y - 190.0f)));
 
+        const char* talk = SDL_GetScancodeName(static_cast<SDL_Scancode>(cfg.talkKey));
+        const char* type = SDL_GetScancodeName(static_cast<SDL_Scancode>(cfg.chatKey));
         Heading("CONVERSATION");
-        changed |= ImGui::Checkbox("Talk to HQ and the squad (Insert: type, hold Caps Lock: speak)", &cfg.enabled);
+        const std::string talkLine = std::string("Talk to HQ and the squad (") + type + ": type, hold " + talk + ": speak)";
+        changed |= ImGui::Checkbox(talkLine.c_str(), &cfg.enabled);
+
+        // One free Google AI Studio key drives the model, voice input and the voices: set it once here.
+        ImGui::Spacing();
+        Heading("QUICK SETUP: ONE GOOGLE KEY FOR EVERYTHING");
+        Label(Font().body, 12.0f, ColMuted, "A free key from aistudio.google.com/apikey runs the model, voice input and voices.");
+        KeyField("googlekey", NpcChat::LlmKeySlot(NpcChat::LlmProvider::Gemini));
+        const bool allGoogle = cfg.llm == NpcChat::LlmProvider::Gemini && cfg.stt == NpcChat::SttProvider::Gemini &&
+                               cfg.tts == NpcChat::TtsProvider::Gemini;
+        if (allGoogle)
+            Label(Font().body, 12.0f, ColGood, "Model, voice input and voices all use this key.");
+        else if (ImGui::Button("Use Google for the model, voice input and voices"))
+        {
+            cfg.llm = NpcChat::LlmProvider::Gemini;
+            cfg.stt = NpcChat::SttProvider::Gemini;
+            cfg.tts = NpcChat::TtsProvider::Gemini;
+            cfg.llmModel.clear(); // each provider's own default, never another provider's model
+            cfg.sttModel.clear();
+            cfg.ttsModel.clear();
+            cfg.ttsVoices.clear(); // Gemini's male voice pool
+            cfg.squadVoices.clear();
+            changed = true;
+            NpcChat::CheckLlm();
+            NpcChat::CheckStt();
+            NpcChat::CheckTts();
+        }
 
         ImGui::Spacing();
         Heading("LANGUAGE MODEL");
-        changed |= ProviderCombo("Provider##llm", cfg.llm, NpcChat::LlmProviderName);
+        ImGui::SetNextItemWidth(250.0f);
+        if (ProviderCombo("Provider##llm", cfg.llm, NpcChat::LlmProviderName))
         {
-            static std::array<char, 128> model{};
-            if (model[0] == 0)
-                std::snprintf(model.data(), model.size(), "%s", cfg.llmModel.c_str());
-            ImGui::SetNextItemWidth(250.0f);
-            if (ImGui::InputTextWithHint("Model##llm", cfg.EffectiveLlmModel().c_str(), model.data(), model.size()))
-            {
-                cfg.llmModel = model.data();
-                changed = true;
-            }
+            cfg.llmModel.clear(); // the new provider's models, loaded from its API
+            changed = true;
+            NpcChat::CheckLlm();
         }
+        changed |= ModelPicker("llmmodel", cfg.llmModel, NpcChat::DefaultLlmModel(cfg.llm), NpcChat::Models(), true);
         if (cfg.llm == NpcChat::LlmProvider::Ollama || cfg.llm == NpcChat::LlmProvider::Custom)
         {
             static std::array<char, 256> url{};
@@ -1939,44 +2085,72 @@ void DrawVoicePanel()
                 changed = true;
             }
         }
-        KeyField("llmkey", NpcChat::LlmKeySlot(cfg.llm));
-        if (ImGui::Button("Check##llm"))
-            NpcChat::CheckLlm();
-        ImGui::SameLine();
-        Label(Font().body, 13.0f, LinkColour(NpcChat::LlmStatus()), LinkWord(NpcChat::LlmStatus()));
-        if (!NpcChat::LlmStatus().message.empty() && NpcChat::LlmStatus().state == NpcChat::LinkState::Failed)
-            Label(Font().body, 12.0f, ColMuted, NpcChat::LlmStatus().message.substr(0, 90).c_str());
+        if (cfg.llm != NpcChat::LlmProvider::Gemini)
+            KeyField("llmkey", NpcChat::LlmKeySlot(cfg.llm));
+        StatusRow("Check and load models##llm", NpcChat::LlmStatus(), &NpcChat::CheckLlm);
 
         ImGui::Spacing();
         Heading("VOICE INPUT (SPEECH TO TEXT)");
-        changed |= ProviderCombo("Provider##stt", cfg.stt, NpcChat::SttProviderName);
+        ImGui::SetNextItemWidth(250.0f);
+        if (ProviderCombo("Provider##stt", cfg.stt, NpcChat::SttProviderName))
+        {
+            cfg.sttModel.clear();
+            changed = true;
+            if (cfg.stt != NpcChat::SttProvider::Off)
+                NpcChat::CheckStt();
+        }
         if (cfg.stt != NpcChat::SttProvider::Off)
         {
-            KeyField("sttkey", NpcChat::SttKeySlot(cfg.stt));
-            if (ImGui::Button("Check##stt"))
-                NpcChat::CheckStt();
-            ImGui::SameLine();
-            Label(Font().body, 13.0f, LinkColour(NpcChat::SttStatus()), LinkWord(NpcChat::SttStatus()));
-            Label(Font().body, 12.0f, ColMuted, "Hold Caps Lock in game and speak; release to send.");
+            changed |= ModelPicker("sttmodel", cfg.sttModel, NpcChat::DefaultSttModel(cfg.stt), NpcChat::SttModels(), false);
+            if (std::string(NpcChat::SttKeySlot(cfg.stt)) != NpcChat::LlmKeySlot(NpcChat::LlmProvider::Gemini))
+                KeyField("sttkey", NpcChat::SttKeySlot(cfg.stt));
+            StatusRow("Check##stt", NpcChat::SttStatus(), &NpcChat::CheckStt);
+            const std::string hold = std::string("Hold ") + talk + " in game and speak; release to send.";
+            Label(Font().body, 12.0f, ColMuted, hold.c_str());
         }
 
         ImGui::Spacing();
         Heading("VOICE OUTPUT (TEXT TO SPEECH)");
-        changed |= ProviderCombo("Provider##tts", cfg.tts, NpcChat::TtsProviderName);
+        ImGui::SetNextItemWidth(250.0f);
+        if (ProviderCombo("Provider##tts", cfg.tts, NpcChat::TtsProviderName))
+        {
+            // The new provider's own voices: its male pool, and each soldier picks again from it.
+            cfg.ttsModel.clear();
+            cfg.ttsVoices.clear();
+            cfg.squadVoices.clear();
+            changed = true;
+            if (cfg.tts != NpcChat::TtsProvider::Off && cfg.tts != NpcChat::TtsProvider::WindowsSapi)
+                NpcChat::CheckTts();
+        }
         if (cfg.tts != NpcChat::TtsProvider::Off)
         {
-            if (cfg.tts != NpcChat::TtsProvider::WindowsSapi)
-                KeyField("ttskey", NpcChat::TtsKeySlot(cfg.tts));
+            const std::string slot = NpcChat::TtsKeySlot(cfg.tts);
+            const bool cloud = cfg.tts != NpcChat::TtsProvider::WindowsSapi && cfg.tts != NpcChat::TtsProvider::Custom;
+            if (cloud)
+            {
+                changed |= ModelPicker("ttsmodel", cfg.ttsModel, NpcChat::DefaultTtsModel(cfg.tts), NpcChat::TtsModels(), false);
+                const std::string voices = "Voices: " + cfg.EffectiveTtsVoices();
+                Label(Font().body, 12.0f, ColMuted, voices.substr(0, 110).c_str());
+            }
+            if (cloud && slot != NpcChat::LlmKeySlot(NpcChat::LlmProvider::Gemini))
+                KeyField("ttskey", slot);
+            // Why the PC's own voice is speaking: no key for this provider, or it refused (quota).
+            const bool keyless = cloud && !slot.empty() && !NpcChat::HasPanelKey(slot) && !NpcChat::HasEnvKey(slot);
+            if (keyless && cfg.tts == NpcChat::TtsProvider::Google &&
+                (NpcChat::HasPanelKey("gemini") || NpcChat::HasEnvKey("gemini")))
+                Label(Font().body, 12.0f, ColWarn,
+                      "\"Google\" is Google Cloud and needs a Cloud key: pick Google Gemini voices for the AI Studio key.");
+            else if (keyless)
+                Label(Font().body, 12.0f, ColWarn, "No key for these voices yet: Windows voices speak until one is set.");
+            else if (cloud && NpcChat::TtsStatus().state == NpcChat::LinkState::Failed)
+                Label(Font().body, 12.0f, ColWarn, "These voices refused (see below): Windows voices speak meanwhile.");
             ImGui::SetNextItemWidth(250.0f);
             changed |= ImGui::SliderFloat("Volume##tts", &cfg.ttsVolume, 0.0f, 1.0f, "%.2f");
             changed |= ImGui::Checkbox("Radio voice when far away", &cfg.ttsRadioWhenFar);
             if (ImGui::Button("Test voice"))
                 NpcChat::TestVoice();
             ImGui::SameLine();
-            if (ImGui::Button("Check##tts"))
-                NpcChat::CheckTts();
-            ImGui::SameLine();
-            Label(Font().body, 13.0f, LinkColour(NpcChat::TtsStatus()), LinkWord(NpcChat::TtsStatus()));
+            StatusRow("Check##tts", NpcChat::TtsStatus(), &NpcChat::CheckTts);
         }
 
         ImGui::Spacing();
@@ -2014,6 +2188,8 @@ void DrawOptions()
         // off mid-game would show what the side has not seen.
         Label(Font().body, 13.0f, ColMuted, o.fog == FogMode::Shroud ? "Fog of war: shroud (set before the war)"
                                                                      : "Fog of war: contacts (set before the war)");
+        Label(Font().body, 13.0f, ColMuted, o.enemyMarkers ? "Enemy markers: on (set before the war)"
+                                                           : "Enemy markers: off (set before the war)");
         ImGui::Spacing();
         changed |= ImGui::Checkbox("Taking control of soldiers", &o.possession);
         changed |= ImGui::Checkbox("HQ radios its orders when you are not in command", &o.hqRadio);
@@ -2105,6 +2281,11 @@ void DrawSetup()
         ImGui::Spacing();
         if (optional != NoSide)
             ImGui::Checkbox("The Resistance fights too (a third side, from its own base)", &o.resistance);
+        if (optional != NoSide && o.resistance)
+            ImGui::Checkbox("The Resistance fights with WEST (friendly to the US)", &o.resistanceAlly);
+        ImGui::SetNextItemWidth(260.0f);
+        ImGui::SliderInt("Time limit", &o.timeLimit, 0, 240, o.timeLimit == 0 ? "off" : "%d min: then the higher score wins");
+        o.timeLimit = (o.timeLimit + 7) / 15 * 15;
         const int towns = VictoryTownsMax(o.resistance);
         o.victoryTowns = std::clamp(o.victoryTowns, 0, towns);
         ImGui::SetNextItemWidth(260.0f);
@@ -2133,6 +2314,7 @@ void DrawSetup()
             o.fog = FogMode::Contacts;
         if (ImGui::RadioButton("Shroud: unexplored ground stays black (top-down view only)", o.fog == FogMode::Shroud))
             o.fog = FogMode::Shroud;
+        ImGui::Checkbox("Enemy markers: symbols over the enemy your side knows of", &o.enemyMarkers);
         ImGui::Checkbox("Taking control of any of your soldiers", &o.possession);
         ImGui::Checkbox("HQ radios its orders", &o.hqRadio);
         ImGui::Spacing();
@@ -2209,6 +2391,58 @@ void Notify(const std::string& text)
         SetStatus(text, ColWarn);
     else if (GWorld && GWorld->UI())
         GWorld->UI()->ShowHint(RString(text.c_str()));
+}
+
+// A base's card (its command tent clicked): who holds it, its supplies, and what can be done there.
+void DrawBaseCard(const Snapshot& snap)
+{
+    State& s = St();
+    const int o = s.baseInfo;
+    if (o < 0 || o >= static_cast<int>(snap.war.defs.size()))
+        return;
+    const ImGuiIO& io = ImGui::GetIO();
+    const ObjectiveDef& d = snap.war.defs[o];
+    const ObjectiveState& st = snap.war.states[o];
+    const int me = PlayerSide();
+    if (BeginPanel("##conquest_base", ImVec2(io.DisplaySize.x - 16.0f, 100.0f), ImVec2(1.0f, 0.0f)))
+    {
+        const std::string title = d.name + (d.kind == ObjectiveKind::HQ ? "  HQ" : "");
+        Label(Font().bold, 16.0f, st.owner == NoSide ? ColText : SideColour(st.owner), title.c_str());
+        const std::string owner = st.owner == NoSide ? "Neutral" : SideTitle(st.owner);
+        char line[160];
+        std::snprintf(line, sizeof(line), "%s   -   income %.0f a minute", owner.c_str(), d.value);
+        Label(Font().body, 13.0f, ColMuted, line);
+        if (st.owner == me)
+        {
+            if (d.kind == ObjectiveKind::HQ)
+                std::snprintf(line, sizeof(line), "Supplies: %.0f (the side's own; trucks load here)", snap.war.pool[me]);
+            else
+                std::snprintf(line, sizeof(line), "Supplies: %.0f   (deploying and the arsenal spend them)", st.stock);
+            Label(Font().bold, 14.0f, ColText, line);
+            if (ImGui::Button("Deploy here"))
+            {
+                s.deployOpen = true;
+                s.deployBase = o;
+            }
+            if (d.kind != ObjectiveKind::HQ)
+            {
+                ImGui::SameLine(0.0f, 8.0f);
+                if (ImGui::Button("Send a supply truck"))
+                {
+                    std::string why;
+                    const std::string who = SendSupplyTo(o, &why);
+                    SetStatus(who.empty() ? "No supply run: " + why : who + " brings the next load to " + d.name + ".",
+                              who.empty() ? ColWarn : ColGood);
+                }
+            }
+        }
+        else if (st.owner != NoSide)
+            Label(Font().body, 13.0f, ColMuted, "The enemy's: its supplies are not known.");
+        ImGui::SameLine(0.0f, 8.0f);
+        if (ImGui::Button("Close##base"))
+            s.baseInfo = -1;
+    }
+    ImGui::End();
 }
 
 // After the war: who won and why; a new war, the menu, or a last look round.
@@ -2317,9 +2551,45 @@ void DrawCommandBar(const std::vector<SquadDraw>& squads)
                 s.selected.clear();
                 s.unit = nullptr;
             }
+            // What these squads can be told now: only the commands that apply to them.
+            const SelectionInfo sel = DescribeSelection(s.selected);
+            std::vector<std::pair<SquadCommand, const char*>> commands{
+                {SquadCommand::Engage, "Engage"}, {SquadCommand::HoldFire, "Hold fire"}, {SquadCommand::Stop, "Stop"}};
+            if (sel.onFoot)
+                commands.emplace_back(SquadCommand::Board, "Board");
+            if (sel.aboard)
+                commands.emplace_back(SquadCommand::GetOut, sel.helicopter ? "Land and unload" : "Get out");
+            if (sel.airborne)
+                commands.emplace_back(SquadCommand::Land, "Land");
+            if (sel.canSupply)
+                commands.emplace_back(SquadCommand::SupplyRuns, "Supply runs");
+            if (sel.onSupply)
+                commands.emplace_back(SquadCommand::Fight, "Fight");
+            commands.emplace_back(SquadCommand::ToBase, "To base");
+            for (size_t i = 0; i < commands.size(); i++)
+            {
+                if (i)
+                    ImGui::SameLine(0.0f, 6.0f);
+                if (ImGui::SmallButton(commands[i].second))
+                {
+                    const int n = CommandSquads(s.selected, commands[i].first);
+                    SetStatus(std::string(commands[i].second) + (n == 1 ? "  -  1 squad" : "  -  " + std::to_string(n) + " squads"));
+                    if (commands[i].first == SquadCommand::Engage && n)
+                    {
+                        // Then the target: a click on a building or vehicle (right click: just fire at will).
+                        s.targeting = true;
+                        s.targetEngage = true;
+                        s.targetAir = false;
+                        SetStatus("Fire at will. Click a building or vehicle to attack it; right click to skip.", ColWarn);
+                    }
+                }
+            }
         }
         else
             Label(Font().body, 13.0f, ColMuted, "Click a squad, or drag a box.   H  controls");
+        ImGui::SameLine(0.0f, 10.0f);
+        if (ImGui::Button("Me  C"))
+            CenterOnMe();
         if (s.helpOpen)
         {
             ImDrawList* draw = ImGui::GetWindowDrawList();
@@ -2334,6 +2604,8 @@ void DrawCommandBar(const std::vector<SquadDraw>& squads)
             KeyCap(draw, "Q E / R F", "Turn / tilt");
             ImGui::SameLine(0.0f, 12.0f);
             KeyCap(draw, "B", "Deploy");
+            ImGui::SameLine(0.0f, 12.0f);
+            KeyCap(draw, "C", "Me");
             ImGui::SameLine(0.0f, 12.0f);
             KeyCap(draw, "Ctrl M", "Leave");
         }
@@ -2479,19 +2751,30 @@ void DrawMinimap(const Snapshot& snap, const std::vector<SquadDraw>& squads)
     for (int side = 0; side < snap.war.sideCount; side++)
         if (side != me)
             enemy = side;
-    for (const Contact& c : KnownEnemies(me))
-    {
-        const ImVec2 p = toMap(c.x, c.y);
-        draw->AddRectFilled(ImVec2(p.x - 1.5f, p.y - 1.5f), ImVec2(p.x + 1.5f, p.y + 1.5f),
-                            SideColour(enemy, 1.0f - std::clamp(c.age / 120.0f, 0.0f, 0.7f)));
-    }
+    // The known enemy as dots: only with the setup's enemy markers option.
+    if (GetOptions().enemyMarkers)
+        for (const Contact& c : KnownEnemies(me))
+        {
+            const ImVec2 p = toMap(c.x, c.y);
+            draw->AddRectFilled(ImVec2(p.x - 1.5f, p.y - 1.5f), ImVec2(p.x + 1.5f, p.y + 1.5f),
+                                SideColour(enemy, 1.0f - std::clamp(c.age / 120.0f, 0.0f, 0.7f)));
+        }
     for (const SquadDraw& d : squads)
     {
         const ImVec2 p = toMap(d.worldX, d.worldY);
         const bool sel = IsSelected(d.group.id);
         draw->AddCircleFilled(p, sel ? 3.2f : 2.4f, SquadShade(d.group.side, d.group.id));
         if (sel)
+        {
             draw->AddCircle(p, 5.0f, ColSelect, 12, 1.2f);
+            if (d.group.hasDest)
+            {
+                // ... and on the minimap, where it is going.
+                const ImVec2 q = toMap(d.group.destX, d.group.destY);
+                draw->AddLine(p, q, WithAlpha(ColSelect, 0.8f), 1.2f);
+                draw->AddCircle(q, 3.0f, ColSelect, 10, 1.2f);
+            }
+        }
     }
     ImGui::End();
 }
@@ -2645,6 +2928,8 @@ bool ProcessEvent(const SDL_Event& event)
                 s.deployOpen = !s.deployOpen;
             if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.scancode == SDL_SCANCODE_H)
                 s.helpOpen = !s.helpOpen;
+            if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.scancode == SDL_SCANCODE_C)
+                CenterOnMe();
             s.consumeKeyboard = true;
             return true;
         case SDL_EVENT_MOUSE_MOTION:
@@ -2671,7 +2956,40 @@ bool ProcessEvent(const SDL_Event& event)
                 const float steps = event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -event.wheel.y : event.wheel.y;
                 EntityAI* followed = s.follow;
                 const float floor = followed ? std::max(FollowMinDistance, followed->GetRadius() * 1.1f) : MinDistance;
+                const float before = s.distance;
                 s.distance = std::clamp(s.distance * std::pow(0.85f, steps), floor, MaxDistance);
+                // What the zoom closes in on: a selected soldier or squad first (a followed one stays centred);
+                // with nothing selected, where the cursor points -- the ground under it stays under it.
+                float gx = 0.0f, gy = 0.0f;
+                bool onSelection = false;
+                if (!followed && !s.selected.empty())
+                {
+                    Person* picked = s.unit;
+                    if (picked)
+                    {
+                        gx = picked->Position().X();
+                        gy = picked->Position().Z();
+                        onSelection = true;
+                    }
+                    else
+                        ForEachGroup(
+                            [&](const LiveGroup& g)
+                            {
+                                if (!onSelection && g.id == s.selected.front() && g.group && g.group->Leader())
+                                {
+                                    gx = g.group->Leader()->Position().X();
+                                    gy = g.group->Leader()->Position().Z();
+                                    onSelection = true;
+                                }
+                            });
+                }
+                if (!followed && s.distance != before &&
+                    (onSelection || GroundAt(event.wheel.mouse_x, event.wheel.mouse_y, gx, gy)))
+                {
+                    const float t = 1.0f - s.distance / before;
+                    s.focusX += (gx - s.focusX) * t;
+                    s.focusY += (gy - s.focusY) * t;
+                }
             }
             return true;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
@@ -2704,7 +3022,8 @@ bool ProcessEvent(const SDL_Event& event)
                 if (s.targeting)
                 {
                     s.targeting = false;
-                    SetStatus("Barrage cancelled.", ColMuted);
+                    SetStatus(s.targetEngage ? "No target: they fire at will." : "Barrage cancelled.", ColMuted);
+                    s.targetEngage = false;
                 }
                 else
                     OrderAt(event.button.x, event.button.y);
@@ -2862,7 +3181,10 @@ void Frame()
     ImDrawList* draw = ImGui::GetBackgroundDrawList();
     DrawShroud(draw);
     DrawObjectives(draw);
-    DrawContacts(draw);
+    // Enemy symbols only with the setup's option (off by default): otherwise the enemy is what the
+    // commander sees of the real units.
+    if (GetOptions().enemyMarkers)
+        DrawContacts(draw);
     DrawSquads(draw, squads);
     DrawFlashes(draw);
     DrawBox(ImGui::GetForegroundDrawList());
@@ -2880,6 +3202,7 @@ void Frame()
     DrawOptions();
     DrawVoicePanel();
     DrawToast();
+    DrawBaseCard(snap);
     DrawVote();
     DrawEnd(snap);
     PopTheme();

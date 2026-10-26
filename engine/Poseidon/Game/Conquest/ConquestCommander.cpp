@@ -175,11 +175,14 @@ std::vector<Intent> PlanStandard(const SideView& view, const CommanderTuning& tu
     };
 
     // 1b. A quiet objective needs one garrison, not the whole assault that took it: keep the
-    // first defenders up to garrisonMen and free the rest for the next target.
+    // first defenders up to garrisonMen and free the rest for the next target. A rear objective (every
+    // neighbour ours) needs none: nothing reaches it without passing another first, and squads left
+    // guarding the far side of their own ground were most of an army standing about (owner, 2026-10-26).
     for (int i = 0; i < count; i++)
     {
         if (!Owns(war, view.side, i) || Threatened(view, i))
             continue;
+        const float garrison = Rear(view, i) ? 0.0f : tuning.garrisonMen;
         float kept = 0.0f;
         for (Slot& slot : slots)
         {
@@ -190,7 +193,7 @@ std::vector<Intent> PlanStandard(const SideView& view, const CommanderTuning& tu
                 kept += static_cast<float>(slot.group->men);
                 continue;
             }
-            if (kept < tuning.garrisonMen)
+            if (kept < garrison)
             {
                 kept += static_cast<float>(slot.group->men);
                 continue;

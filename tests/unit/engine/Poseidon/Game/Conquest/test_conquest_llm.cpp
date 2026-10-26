@@ -21,7 +21,8 @@ TEST_CASE("LLM commander: a well-formed answer becomes priorities, posture and a
     Llm::Advice advice;
     std::string error;
     const std::string text = R"({"priorities": [{"objective": "Figari", "weight": 3}, {"objective": "montignac", "weight": -1}],
-        "posture": "attack", "buy": "tank", "barrage": "figari", "reason": "Figari first, it opens the road north."})";
+        "posture": "attack", "buy": "tank", "barrage": "figari", "reason": "Figari first, it opens the road north.",
+        "radio": "We hold Morton and push north. Alpha, Bravo: Figari."})";
     REQUIRE(Llm::ParseAdvice(text, Towns, Squads, advice, error));
     REQUIRE(advice.priorities.size() == 2);
     CHECK(advice.priorities[0].first == "Figari");
@@ -31,6 +32,7 @@ TEST_CASE("LLM commander: a well-formed answer becomes priorities, posture and a
     CHECK(advice.buy == "Tank");
     CHECK(advice.barrage == "Figari"); // the mortars, on a town the report named
     CHECK(advice.reason == "Figari first, it opens the road north.");
+    CHECK(advice.radio == "We hold Morton and push north. Alpha, Bravo: Figari.");
 }
 
 TEST_CASE("LLM commander: prose and fences round the JSON are tolerated", "[conquest][llm]")

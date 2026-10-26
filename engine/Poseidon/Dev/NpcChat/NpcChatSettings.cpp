@@ -228,7 +228,39 @@ std::string Settings::EffectiveSttModel() const { return sttModel.empty() ? Defa
 std::string Settings::EffectiveSttBaseUrl() const { return sttBaseUrl.empty() ? DefaultSttBaseUrl(stt) : sttBaseUrl; }
 std::string Settings::EffectiveTtsModel() const { return ttsModel.empty() ? DefaultTtsModel(tts) : ttsModel; }
 std::string Settings::EffectiveTtsBaseUrl() const { return ttsBaseUrl.empty() ? DefaultTtsBaseUrl(tts) : ttsBaseUrl; }
-std::string Settings::EffectiveTtsVoices() const { return ttsVoices.empty() ? DefaultTtsVoices(tts) : ttsVoices; }
+std::string Settings::EffectiveTtsVoices() const
+{
+    if (ttsVoices.empty())
+        return DefaultTtsVoices(tts);
+    if (tts != TtsProvider::Gemini)
+        return ttsVoices;
+    // A pool picked for another provider (ElevenLabs voice ids, say) holds no Gemini voice: Google refuses
+    // every line and the squad speaks with Windows voices. Keep only Gemini's own prebuilt voices.
+    static const char* const gemini[] = {
+        "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede", "Callirrhoe", "Autonoe",
+        "Enceladus", "Iapetus", "Umbriel", "Algieba", "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia",
+        "Achernar", "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi", "Vindemiatrix",
+        "Sadachbia", "Sadaltager", "Sulafat"};
+    std::string kept, item;
+    const auto take = [&]()
+    {
+        while (!item.empty() && item.front() == ' ')
+            item.erase(item.begin());
+        while (!item.empty() && item.back() == ' ')
+            item.pop_back();
+        for (const char* name : gemini)
+            if (_stricmp(item.c_str(), name) == 0)
+                kept += (kept.empty() ? "" : ",") + std::string(name);
+        item.clear();
+    };
+    for (char c : ttsVoices)
+        if (c == ',')
+            take();
+        else
+            item += c;
+    take();
+    return kept.empty() ? DefaultTtsVoices(tts) : kept;
+}
 const char* ToneName(int tone)
 {
     switch (tone)
@@ -370,7 +402,7 @@ void ReadEnum(const cJSON* root, const char* name, E& out)
 std::string SettingsToJson(const Settings& s)
 {
     cJSON* root = cJSON_CreateObject();
-    cJSON_AddNumberToObject(root, "version", 4);
+    cJSON_AddNumberToObject(root, "version", 5);
     cJSON_AddBoolToObject(root, "enabled", s.enabled);
     cJSON_AddNumberToObject(root, "llm", static_cast<int>(s.llm));
     cJSON_AddStringToObject(root, "llmModel", s.llmModel.c_str());
@@ -477,6 +509,8 @@ bool SettingsFromJson(const std::string& json, Settings& s)
         s.muteGameVoices = true; // v3: the game's own radio voices are muted by default under NPC voices
     if (version < 4 && s.talkKey == 77)
         s.talkKey = 57; // v4: hold Caps Lock to talk (was End)
+    if (version < 5 && s.talkKey == 57)
+        s.talkKey = 24; // v5: hold U (Caps Lock is the game's voice-over-net key)
     ReadBool(root, "rememberKeys", s.rememberKeys);
     ReadEnum(root, "squadVoicesProvider", s.squadVoicesProvider);
     if (const cJSON* voices = cJSON_GetObjectItemCaseSensitive(root, "squadVoices"); cJSON_IsObject(voices))

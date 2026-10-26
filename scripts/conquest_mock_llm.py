@@ -21,6 +21,7 @@ PLAN = {
     "posture": "attack",
     "buy": "Motorised squad",
     "reason": "Tyrone first: it covers the road south from the airfield.",
+    "radio": "We hold the airfield and push south to Tyrone. Every squad: Tyrone.",
 }
 
 

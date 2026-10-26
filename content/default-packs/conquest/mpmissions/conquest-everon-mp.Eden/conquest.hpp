@@ -9,9 +9,13 @@ class CfgConquest
     sides[] = {"WEST", "EAST", "GUER"};
     resistance = 0;
     startPool = 500;   // each side, on top of its starting squads (the setup screen sets each side's)
-    // Free, at each HQ when the war begins: three squads, a tank and a helicopter with its squad.
-    startSquads[] = {"Motorised", "Rifle", "Recon", "Armour", "AirAssault"};
-    cap = 60;          // living soldiers per side
+    // Free, at each HQ when the war begins: three squads, two tanks, a helicopter with its squad and a
+    // supply truck.
+    startSquads[] = {"Motorised", "Rifle", "Recon", "Armour", "Armour", "AirAssault", "Supply"};
+    cap = 80;          // living soldiers per side (160 alive: about 1 ms of AI a tick, measured 2026-10-26)
+    capThreeSides = 55; // per side with the Resistance in: the same total
+    timeLimit = 0;     // minutes; then the higher war score wins (0: off; the setup screen sets it)
+    resistanceFriendlyWest = 0; // the Resistance fights with WEST (setup screen)
     planSeconds = 20;  // the commanders replan this often, and at once on a capture
     victoryTowns = 0;  // villages a side must hold to win (0: the war score or the enemy's last base decides)
     // The opening screen offers the side and these choices; setup = 0 starts at once with them.
@@ -20,6 +24,7 @@ class CfgConquest
     possession = 1;      // allow taking control of any friendly soldier
     commanderView = 1;   // the top-down command view (Ctrl+M)
     fog = "contacts";    // or "shroud": unexplored ground stays black in the command view
+    enemyMarkers = 0;    // symbols over the enemy the side knows of in the command view (setup screen)
     hqRadio = 1;         // the AI commander radios its orders while the player is not in command
     // A side's commander personality: "balanced", "aggressive" or "cautious" (the AI's posture).
     WESTpersonality = "balanced";
@@ -43,6 +48,7 @@ class CfgConquest
     barrageSpread = 35;
     barrageAmmo = "Shell120"; // a 120 mm mortar round
     barrageRange = 4000;      // a side fires only on targets this close to a base it holds
+    supportDelay = 300;       // no mortars or air strikes in the war's first 5 minutes
 
     // Air support (SUPPORT panel; the AI commanders call it on armour and crowds the mortars cannot
     // reach): the side's attack plane flies in from its own ground and drops a tight stick of bombs.
@@ -118,6 +124,23 @@ class CfgConquest
             WESTvehicles[] = {"UH60"};
             EASTvehicles[] = {"Mi17"};
             GUERvehicles[] = {"Mi17"};
+        };
+        // The supply line: the HQ spends the side's pool, every other base its own stock, which barely grows by
+        // itself and is lost with the base. A supply squad loads at the HQ, drives to the base that needs it
+        // most, unloads and comes back (ConquestRefereeSupply.inc). The AI keeps one for every three bases.
+        class Supply
+        {
+            name = "Supply truck";
+            cost = 120;
+            role = "supply";
+            ai = 0;      // bought by the supply line, not as a fighting squad
+            mounted = 1; // its crew drives the truck
+            WEST[] = {"SoldierWB", "SoldierWB"};
+            EAST[] = {"SoldierEB", "SoldierEB"};
+            GUER[] = {"SoldierGB", "SoldierGB"};
+            WESTvehicles[] = {"Truck5tReammo"};
+            EASTvehicles[] = {"UralReammo"};
+            GUERvehicles[] = {"UralReammo"};
         };
         // Heavy: the AI saves up for one in every four purchases. Their crews stay mounted.
         class Armour
