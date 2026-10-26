@@ -106,14 +106,28 @@ fn boxQ(i: u32, rel: vec3<f32>) -> vec3<f32> {
     return (toBox(i, rel) - b.origin_cell.xyz) / (b.dims_fade.xyz * b.origin_cell.w);
 }
 
-// the field at camera-relative `rel`, faded out at the box's sides and top so the box never
-// shows (the bottom stands on the ground and keeps its edge)
+// the fade at the box's sides and top, so the box never shows (the bottom stands on the ground
+// and keeps its edge). In a strong wind the plume leans into the downwind wall and the top, and a
+// fade over a tenth of the box, flat as the wall, still drew its straight edge through the smoke
+// (owner, 2026-10-26: "make sure if there is a lot of wind, that the bounding box limit of the
+// fire does not become obvious"): the fade is wider, and its edge is warped by a slowly drifting
+// ripple about a twelfth of the box deep, so where the smoke thins is not a plane.
+fn boxFade(q: vec3<f32>) -> f32 {
+    let t = M.sizes.w;
+    let warp = 0.045 * (sin(dot(q, vec3<f32>(9.1, 6.3, 7.7)) + t * 0.9)
+        + sin(dot(q, vec3<f32>(-5.3, 11.2, 8.4)) - t * 0.7) * 0.6
+        + sin(dot(q, vec3<f32>(13.7, -4.1, -10.9)) + t * 1.3) * 0.4);
+    let side = min(min(q.x, 1.0 - q.x), min(q.z, 1.0 - q.z)) + warp;
+    let top = 1.0 - q.y + warp;
+    return smoothstep(0.02, 0.15, side) * smoothstep(0.02, 0.25, top);
+}
+
+// the field at camera-relative `rel`, faded out at the box's sides and top (boxFade)
 fn fieldAt(i: u32, rel: vec3<f32>) -> vec4<f32> {
     let b = M.boxes[i];
     let q = boxQ(i, rel);
     if (any(q < vec3<f32>(0.0)) || any(q > vec3<f32>(1.0))) { return vec4<f32>(0.0); }
-    let side = min(min(q.x, 1.0 - q.x), min(q.z, 1.0 - q.z));
-    let fade = smoothstep(0.0, 0.1, side) * smoothstep(0.0, 0.15, 1.0 - q.y) * b.dims_fade.w;
+    let fade = boxFade(q) * b.dims_fade.w;
     let f = sampleField(i, q);
     return vec4<f32>(f.x * fade, f.y, f.z * fade, f.w * fade);
 }
@@ -126,8 +140,7 @@ fn fieldAtCubic(i: u32, rel: vec3<f32>) -> vec4<f32> {
     let b = M.boxes[i];
     let q = boxQ(i, rel);
     if (any(q < vec3<f32>(0.0)) || any(q > vec3<f32>(1.0))) { return vec4<f32>(0.0); }
-    let side = min(min(q.x, 1.0 - q.x), min(q.z, 1.0 - q.z));
-    let fade = smoothstep(0.0, 0.1, side) * smoothstep(0.0, 0.15, 1.0 - q.y) * b.dims_fade.w;
+    let fade = boxFade(q) * b.dims_fade.w;
     let n = b.dims_fade.xyz;
     let st = q * n - 0.5;
     let fr = fract(st);
