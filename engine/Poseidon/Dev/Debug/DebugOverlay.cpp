@@ -6936,6 +6936,9 @@ void DrawWaterTab()
         changed |= Dev::SliderFloat("TW foam coverage", &t.foamCoverage, 0.0f, 3.0f, "%.2f");
         changed |= Dev::SliderFloat("TW foam intensity", &t.foamIntensity, 0.0f, 3.0f, "%.2f");
         changed |= Dev::Checkbox("TW screen-space reflections", &t.ssr);
+        changed |= Dev::Checkbox("TW sun glitter", &t.sunGlitter);
+        Dev::PanelTooltip("The sun's sparkle on the sea: tiny facets on the water that mirror the sun, "
+                          "along the glitter path and round it. On by default.");
         changed |= Dev::SliderFloat("TW reflection strength", &t.reflectionStrength, 0.0f, 2.0f, "%.2f");
         changed |= Dev::SliderFloat("TW water glow", &t.waterGlow, 0.0f, 1.0f, "%.2f");
         Dev::PanelTooltip("Light scattered inside the water toward the eye (W3j). 0 = the surface's reflection "

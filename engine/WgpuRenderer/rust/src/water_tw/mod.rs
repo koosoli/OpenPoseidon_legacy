@@ -318,9 +318,12 @@ struct TwSurface {
     hulls: [[f32; 4]; wake::SLOTS * 4],
     // (OP) blood in the water: per stain x, z, age, amount (impacts.rs blood_lanes, tw_impact.wgsl)
     blood: [[f32; 4]; impacts::BLOOD_SLOTS],
+    // (OP) x: sun glitter on (SEA-GLINTS; the Water tab's switch rides in WgrWaterParams::water_backend_pad[0],
+    // 1 = off, so a zero-filled producer keeps the default)
+    look: [f32; 4],
 }
 
-const _: () = assert!(std::mem::size_of::<TwSurface>() == 16 * (20 + cdlod::LEVELS + wake::SLOTS * 4 + impacts::SURFACE_SLOTS * 2 + rotor_wash::SOURCES + wake::SLOTS * 4 + impacts::BLOOD_SLOTS));
+const _: () = assert!(std::mem::size_of::<TwSurface>() == 16 * (21 + cdlod::LEVELS + wake::SLOTS * 4 + impacts::SURFACE_SLOTS * 2 + rotor_wash::SOURCES + wake::SLOTS * 4 + impacts::BLOOD_SLOTS));
 
 /// The water mask of the wake boats whose producer flagged one (`tidewater_wake` flags bit 2): no sea
 /// surface is drawn inside these hulls (tw_water.wgsl `insideHull`). Lanes per boat as `TwSurface::hulls`.
@@ -493,6 +496,7 @@ fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
         rotor_sources: f.rotor.sources,
         hulls: hull_mask_lanes(p),
         blood: f.blood,
+        look: [if p.water_backend_pad[0] & 1 != 0 { 0.0 } else { 1.0 }, 0.0, 0.0, 0.0],
     }
 }
 
@@ -1880,7 +1884,8 @@ mod tests {
         assert_eq!(std::mem::offset_of!(TwSurface, rotor_sources), 832);
         assert_eq!(std::mem::offset_of!(TwSurface, hulls), 960);
         assert_eq!(std::mem::offset_of!(TwSurface, blood), 1088);
-        assert_eq!(std::mem::size_of::<TwSurface>(), 1344);
+        assert_eq!(std::mem::offset_of!(TwSurface, look), 1344);
+        assert_eq!(std::mem::size_of::<TwSurface>(), 1360);
     }
 
     #[test]

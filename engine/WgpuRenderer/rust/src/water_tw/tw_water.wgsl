@@ -1017,7 +1017,12 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
     // passing over a swimmer's eye turned the whole distant sea, seen through that crest from above,
     // into the view from below: total internal reflection, the water's own teal in-scatter, a teal band
     // along the horizon at the waterline (owner's "turquoise in high waves").
-    let farFromBelow = camH < 0.0 && pos.y > frame.cam_pos.y;
+    // (OP, 2026-10-26) ...but "above the eye" is not the test: the water writes no depth, so every layer
+    // of surface along a ray is drawn, and with a big wave over the camera the line between the two
+    // shadings ran dead straight across the frame at eye level (owner: "big waves ... still not where it
+    // needs to go"). A point is seen from below when the view ray goes up through it, along the surface's
+    // own (smooth) normal: the crest's underside over the eye, and not the sea the ray reaches past it.
+    let farFromBelow = camH < 0.0 && dot(rel, surf.normal) > 0.0;
     let viewFromBelow = select(farFromBelow, !seenFromAbove, nearSurface && !folded);
     let Nup = surf.normal;
 #ifdef SEA_SPECAA
@@ -1130,7 +1135,7 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         let hN = max(dot(H, N), 1e-3);
         let need = vec2<f32>(dot(H, t1), dot(H, t2)) / hN;
         // past 2.5 spreads hardly a facet mirrors the sun (one in ~80)
-        if (dot(need, need) < 6.25 * sig * sig && NdL > 0.0) {
+        if (dot(need, need) < 6.25 * sig * sig && NdL > 0.0 && tw.look.x > 0.5) {
             let lod = max(log2(footprint * 1.5 / GLINT_CELL), 0.0);
             let l0 = floor(lod);
             // one facet octave, two only across the middle of the step between them
