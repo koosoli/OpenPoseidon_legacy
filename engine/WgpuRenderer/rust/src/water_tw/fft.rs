@@ -621,9 +621,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
     let idx = gid.z * {nn}u + gid.y * {N}u + gid.x;
     h0[idx] = tmp[idx];
     foam[idx] = 0.0;
+    foam[idx + {total}u] = 0.0;
     if (ocean.seed.w == 0xFFFFFFFFu) {{ foam[idx] = 1.0; }}
 }}
-"#
+"#,
+            total = N * N * CASCADES
         )
     )
 }
@@ -725,6 +727,11 @@ fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid
 }
 
 pub fn wgsl_columns() -> String {
+    wgsl_columns_with(crate::water_tw::foam2_enabled())
+}
+
+/// The column kernel; `active`: also keep TW-FOAM2's active-breaking field.
+pub fn wgsl_columns_with(active: bool) -> String {
     let nn = N * N;
     let mut s = header_uniform_and(&[
         ("tmp", "array<vec4<f32>>"),
@@ -779,7 +786,7 @@ fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid
         let f = prev * exp(-ocean.p0.w * ocean.p1.w) + gen * ocean.p1.x * ocean.p1.w;
         let fNew = clamp(max(f, gen * 0.5), 0.0, 1.5);
         foam[idx] = fNew;
-
+{active}
         let uv = vec2<u32>(col, y);
         let vDisp = vec4<f32>(lambda * Dx, Dy, lambda * Dz, fNew);
         let vDeriv = vec4<f32>(Dyx, Dyz, lambda * Dxx, lambda * Dzz);
@@ -790,7 +797,18 @@ fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wid
     }}
 }}
 "#,
-        stages = butterfly_stages()
+        stages = butterfly_stages(),
+        active = if active {
+            format!(
+                "        // TW-FOAM2: active breaking, the same generation living ~0.4 s (open-water's\n\
+                 \x20       // ocean.js, MIT): the cap's solid core; the persistent foam above is its lace\n\
+                 \x20       let act = foam[idx + {total}u] * exp(-2.5 * ocean.p1.w) + gen * ocean.p1.x * ocean.p1.w * 2.5;\n\
+                 \x20       foam[idx + {total}u] = clamp(act, 0.0, 1.5);\n",
+                total = N * N * CASCADES
+            )
+        } else {
+            String::new()
+        }
     ));
     s
 }
@@ -992,7 +1010,8 @@ impl OceanFft {
         let h0 = storage(device, "tw_fft_h0", total * v4);
         let wave = storage(device, "tw_fft_wave", total * v4);
         let tmp = storage(device, "tw_fft_tmp", total * 2 * v4);
-        let foam = storage(device, "tw_fft_foam", total * 4);
+        // two halves: the persistent whitecap foam, then (TW-FOAM2) the active-breaking field
+        let foam = storage(device, "tw_fft_foam", total * 4 * 2);
         let mip_src = storage(device, "tw_fft_mip_src", total * 2 * v4);
         let mip_mid = storage(device, "tw_fft_mip_mid", 64 * CASCADES as u64 * 2 * v4);
 
@@ -1181,8 +1200,8 @@ impl OceanFft {
         timers.end(encoder, Region::TwOceanFft);
     }
 
-    /// The persistent foam field (N x N x CASCADES f32), for the cover measurement.
-    #[cfg(test)]
+    /// The foam buffer: the persistent foam field (N x N x CASCADES f32, the cover measurement reads
+    /// it), then TW-FOAM2's active-breaking field (the water shader's binding 30).
     pub fn foam_buffer(&self) -> &wgpu::Buffer {
         &self._buffers[3]
     }
@@ -1214,6 +1233,7 @@ mod tests {
         validate("copy_h0", &wgsl_copy_h0());
         validate("rows", &wgsl_rows());
         validate("columns", &wgsl_columns());
+        validate("columns with active breaking", &wgsl_columns_with(true));
         for t in 0..2 {
             validate("mips_a", &wgsl_mips_a(t));
             validate("mips_b", &wgsl_mips_b(t));

@@ -60,6 +60,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     var acc = vec4<f32>(0.0);
     var wsum = 0.0;
     var best = 0.0; // the best depth match among the taps
+    // the same over the taps that were marched to geometry, not to the sky
+    var acc_geo = vec4<f32>(0.0);
+    var wsum_geo = 0.0;
+    var best_geo = 0.0;
+    var near_geo = 1e30; // the nearest of them
     // A small spatial reconstruction kernel suppresses fixed march jitter.
     // It adds no ray-march steps, temporal lag or additional render target.
     for (var k = 0; k < 9; k = k + 1) {
@@ -82,6 +87,12 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let w = spatial * max(match_w, 0.02);
         acc += cloud * w;
         wsum += w;
+        if (d_lo > 0.0) {
+            acc_geo += cloud * w;
+            wsum_geo += w;
+            best_geo = max(best_geo, match_w);
+            near_geo = min(near_geo, lin_lo);
+        }
     }
     var c = acc / max(wsum, 1e-6);
     // (OP, 2026-10-14) A thin sliver of GEOMETRY whose depth matches no tap -- a far wave crest
@@ -89,8 +100,23 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // the 0.02 floor: with huge waves the clouds drew over the sea (owner: "clouds and anything else
     // will draw over huge waves"; the clouds' own march stops at the crest, the upsample did not).
     // Where nothing in the kernel was marched to this surface, it gets no cloud rather than the sky's.
+    //
+    // (2026-10-26, owner: "when i am in the clouds i can see a horizontal line in the middle of the
+    // screen when looking in the direction of the horizon") At the grazing horizon each row of
+    // ground or sea is far beyond the one below it, so no tap matched any pixel there either and a
+    // band of rows lost the deck the camera stood in -- stripes three pixels apart, the low-res
+    // buffer's period. So geometry is filtered from the taps marched to geometry (the sky's taps
+    // carry the clouds behind it), and goes cloudless only as a sliver in front of all of them or
+    // with none of them in the kernel.
     if (d_ref > 0.0) {
-        c = mix(vec4<f32>(0.0, 0.0, 0.0, 1.0), c, smoothstep(0.05, 0.4, best));
+        if (wsum_geo > 0.0) {
+            c = acc_geo / wsum_geo;
+            if (lin_ref < near_geo * 0.8) {
+                c = mix(vec4<f32>(0.0, 0.0, 0.0, 1.0), c, smoothstep(0.05, 0.4, best_geo));
+            }
+        } else {
+            c = mix(vec4<f32>(0.0, 0.0, 0.0, 1.0), c, smoothstep(0.05, 0.4, best));
+        }
     }
     if (layer_control.x < 0.5 || layer_packet.control.x < 0.5) { return c; }
     // The finite layers are certified below the cloud deck. The background

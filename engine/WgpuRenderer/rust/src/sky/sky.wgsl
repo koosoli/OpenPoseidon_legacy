@@ -1730,6 +1730,16 @@ fn march_clouds(
     let ao_floor = mix(0.35, 0.7, cov);
 
     let ls_base = thick / f32(light_steps);
+#ifdef CLOUD_DECK
+    // (CLOUD-DECK) the per-ray part of the two-stream term, out of the sample loop: closed-deck vs
+    // broken-cumulus weighting, the sun's elevation over the deck (the shell is ~1-2 km up a 6371 km
+    // planet: the camera's vertical is the deck's), the side-lit cumulus factor, the neutral-cool colour
+    let deck_mu0 = max(dot(normalize(pos), sun), 0.0);
+    let deck_side = mix(0.12, 0.5, 1.0 - smoothstep(-0.6, 0.3, cos_t));
+    let deck_col = dot(sun_col, vec3<f32>(0.2126, 0.7152, 0.0722)) * vec3<f32>(0.93, 1.0, 1.09)
+        * mix(deck_side, deck_mu0 / PI, smoothstep(0.75, 0.95, cov));
+    let deck_up_k = 0.11 * thick * 0.35;
+#endif
 
     var col = vec3<f32>(0.0);
     var trans = 1.0;
@@ -1772,6 +1782,15 @@ fn march_clouds(
 #else
                 direct = sun_col * exp(-od) * phase * beer;
 #endif
+#ifdef CLOUD_DECK
+                // (OP, CLOUD-DECK) two-stream diffusion through thick cloud (open-water's clouds.js,
+                // MIT): sunlight diffused through the column above, transmitted as 1/(1 + 0.75(1-g) tau)
+                // with g ~ 0.85, fills the interior near-isotropically. A closed deck is a slab lit from
+                // above (E mu0 T_d / pi); broken cumulus are bright from the sunlit side and dark
+                // bodies with bright rims backlit. Neutral-cool: the mixed sun and sky at the cloud top.
+                let deck_td = 1.0 / (1.0 + 0.11 * od);
+                direct += deck_col * (deck_td * (1.0 - exp(-0.15 * od)));
+#endif
             }
             // SKY-004: the identical march toward the MOON. Same steps, same growth, same
             // Beer-Powder -- it is the same physics with a different body, and self-shadowing is
@@ -1800,7 +1819,13 @@ fn march_clouds(
             let hfp = clamp((length(p) - (sky.params.z + sky.cloud0.z)) / thick, 0.0, 1.0);
             // darker undersides (cheap AO). The lunar multiple-scattering fill rides the SAME
             // height gradient as the sky ambient, so it cannot flatten the deck.
+#ifdef CLOUD_DECK
+            // (CLOUD-DECK) the skylight filters down through the cloud above this sample (two-stream)
+            let deck_up = 1.0 / (1.0 + deck_up_k * sigma * (1.0 - hfp));
+            let ambient = (amb_sky + amb_moon) * mix(ao_floor, 1.0, hfp) * deck_up;
+#else
             let ambient = (amb_sky + amb_moon) * mix(ao_floor, 1.0, hfp);
+#endif
             let scatter = direct + ambient;
             let seg = exp(-sigma * dt);
             // In-scattered radiance over the segment: T * albedo * J * (1 - exp(-sigma*dt)), with
@@ -2844,7 +2869,13 @@ fn fs_cloud(in: VsOut) -> @location(0) vec4<f32> {
 
     // PERF-CLOUD-TEMPORAL: three pixels in four of an all-sky, upward neighbourhood take last
     // frame's march at this direction; the fourth (the rotating phase) marches as always.
-    if (cloud_tc.params.x > 0.5 && d == 0.0 && dir.y > 0.02) {
+    // Not from inside the deck or within 500 m of it (owner, 2026-10-26: "in the clouds i can see a
+    // horizontal line in the middle of the screen when looking in the direction of the horizon"):
+    // the reuse looks a pixel up by direction alone, which holds for cloud kilometres away, but in
+    // the deck the cloud is metres off, so above dir.y 0.02 the view showed last frames' march --
+    // smeared by the flight and on a stale jitter -- and below it a fresh one, meeting at the horizon.
+    let deck_far = length(pos) < cloud_shell_bot() - 500.0 || length(pos) > cloud_shell_top() + 500.0;
+    if (cloud_tc.params.x > 0.5 && d == 0.0 && dir.y > 0.02 && deck_far) {
         let hp = vec2<u32>(in.clip.xy);
         let phase = (hp.x & 1u) | ((hp.y & 1u) << 1u);
         if (phase != u32(cloud_tc.params.y) && cloud_sky_neighbourhood(in.uv, dd)) {

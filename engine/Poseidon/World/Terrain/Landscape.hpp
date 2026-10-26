@@ -410,6 +410,11 @@ class Weather
     float _skyThrough;
 
     float _rainDensity, _rainDensityWanted, _rainDensitySpeed;
+    // A mission or script set the rain (setRain, or the server's weather on a client): from then on
+    // the rain goes where it was set and stays, whatever the overcast. Without it OFP's rule holds --
+    // above 0.67 overcast the rain wanders at random, at or below it there is none -- so a heavy
+    // overcast need not mean rain and a scripted rain under light cloud is kept (owner, 2026-10-26).
+    bool _rainScripted = false;
 
     Poseidon::Foundation::Time _thunderBoltTime;
     Vector3 _windSpeed;
@@ -428,6 +433,9 @@ class Weather
 
     void SetOvercast(Landscape* land, float overcast);
     void SetRain(float density, float time);
+    // A new mission starts with OFP's overcast-driven rain again.
+    void ClearScriptedRain() { _rainScripted = false; }
+    bool IsRainScripted() const { return _rainScripted; }
     // Defined inline alongside GetFog. It was declared here and defined nowhere in the
     // tree, so calling Landscape::GetOvercast() — which forwards to this — was a link
     // error waiting for its first caller; the Zeus weather panel found it in 2026-08.
@@ -1641,6 +1649,8 @@ public:
     void SetOvercast(float overcast) { _weather.SetOvercast(this, overcast); }
     void SetFog(float fog) { _weather.SetFog(this, fog); }
     void SetRain(float density, float time) { _weather.SetRain(density, time); }
+    void ClearScriptedRain() { _weather.ClearScriptedRain(); }
+    bool IsRainScripted() const { return _weather.IsRainScripted(); }
     void Simulate(float deltaT);
     // No sea on the moon (whole world's moon frame): its ground lies below 0 away from the frame's anchor.
     float GetSeaLevel() const { return EarthStreaming::OnMoon ? -1.0e9f : _seaLevelWave; }

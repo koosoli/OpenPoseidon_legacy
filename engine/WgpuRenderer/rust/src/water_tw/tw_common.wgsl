@@ -35,6 +35,7 @@ struct TwSurface {
     rotorSources: array<vec4<f32>, 8>, // actual rotor-only world XZ, radius, strength
     hulls: array<vec4<f32>, 8>,   // hulls that keep the sea out, 4 lanes each (mod.rs hull_mask_lanes)
     blood: array<vec4<f32>, 16>,   // (OP) blood in the water: x, z, age, amount per stain (tw_impact.wgsl)
+    look: vec4<f32>,               // (OP) the Water tab's switches: x sun glitter, y crest bunching (SEA-HYDRO), z froth smear (SEA-SMEAR); w unused
 };
 
 struct ConformParams {
