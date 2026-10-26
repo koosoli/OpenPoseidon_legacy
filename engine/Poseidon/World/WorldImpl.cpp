@@ -2406,6 +2406,7 @@ LSError World::Serialize(ParamArchive& ar, int message)
     PARAM_CHECK(AIGlobalSerialize(ar))
 
     PARAM_CHECK(ar.Serialize("Scripts", _scripts, 3))
+    PARAM_CHECK(Conquest::Serialize(ar)) // the war's own state; its squads and vehicles are saved above
 
     PARAM_CHECK(ar.Serialize("OnMapSingleClick", GMapOnSingleClick, 1, RString()))
 
@@ -2446,9 +2447,18 @@ LSError World::Serialize(ParamArchive& ar, int message)
         SetBaseDirectory(dir == GetUserMissionsBase(), dir);
         RString mission;
         PARAM_CHECK(ar.Serialize("mission", mission, 1, ""))
-        SetMission(world, mission);
+        // The subdirectory first: SetMission reads the mission's description.ext and stringtable from
+        // it. The two-argument form assumed "missions/", so a save of a mission anywhere else (a
+        // content pack's Missions/OpenPoseidon, a --test-mission folder) loaded without its
+        // description.ext -- and without the CfgConquest, briefing settings and the rest it holds.
         PARAM_CHECK(ar.Serialize("subdirectory", dir, 1, ""))
-        SetBaseSubdirectory(dir);
+        if (dir.GetLength() > 0)
+            SetMission(world, mission, dir);
+        else
+        {
+            SetMission(world, mission); // as before for a save without one
+            SetBaseSubdirectory(dir);
+        }
         PARAM_CHECK(ar.Serialize("filenameReal", Glob.header.filenameReal, 1, ""))
 
         ParseMission(false);

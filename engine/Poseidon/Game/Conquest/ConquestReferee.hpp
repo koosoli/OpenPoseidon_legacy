@@ -9,16 +9,20 @@
 // move paths. It also counts losses, cleans up old bodies and keeps the map markers current.
 //
 // Inert unless the mission's description.ext declares `class CfgConquest` (see
-// content/default-packs/conquest/missions/conquest-everon.Eden). Single player only for now; not saved yet (Slice 1).
+// content/default-packs/conquest/missions/conquest-everon.Eden). Single player only for now; a saved game
+// carries the war (Serialize).
 
 #include <Poseidon/Game/Conquest/ConquestCommander.hpp>
 #include <Poseidon/Game/Conquest/ConquestRules.hpp>
+#include <Poseidon/IO/Serialization/SerializeClass.hpp>
 
 #include <array>
 #include <deque>
 #include <functional>
 #include <string>
 #include <vector>
+
+class ParamArchive;
 
 namespace Poseidon
 {
@@ -62,6 +66,11 @@ struct Snapshot
 void Simulate();
 
 const Snapshot& GetSnapshot();
+
+/// The war in a saved game (World::Serialize, after the groups and vehicles it refers to). A load
+/// keeps what it reads until the next Simulate, which reads the mission's CfgConquest again and
+/// continues the saved war instead of starting a new one. A save without a war loads as none.
+LSError Serialize(ParamArchive& ar);
 
 /// The player's map click as their side's commander (x east, y north). A click near one of the
 /// side's squads selects it (shift adds); otherwise the selected squads get the order: attack or

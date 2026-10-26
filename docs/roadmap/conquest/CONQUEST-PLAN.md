@@ -536,3 +536,12 @@ At the owner's request (2026-10-25/26), ahead of the slice order:
   `scripts/Build-Conquest.ps1` from `Build-DefaultContent.ps1`, installed by `Deploy.ps1`). It carries the
   `op_conquest` addon and the mission in `Missions\OpenPoseidon\conquest-everon.Eden`, which moved there from
   `dev-missions/`. The main menu has a **CONQUEST** entry that starts it; without the pack it says so.
+- **Saved games carry the war** (`Conquest::Serialize`, called from `World::Serialize` after the scripts): objectives,
+  pools, scores, losses, every squad record with its group link, tracked units, the commander's body while the
+  player is inside a soldier, and the war log. A load continues the saved war; a save without one (the
+  start-of-mission autosave a retry loads) starts the war afresh instead of stopping Conquest. Saved with the
+  commander view open, the view opens again. `scripts/Test-ConquestSave.ps1` saves mid-war, plays on, loads and
+  checks that the restored state matches the save exactly and that the war continues: all 20 checks pass.
+- **Engine fix found on the way:** a load read a mission's `description.ext` and stringtable from `missions/` whatever
+  folder the mission was in (`World::Serialize` called `SetMission` before restoring the subdirectory). Any save of
+  a content-pack or `--test-mission` mission loaded without its description.ext.

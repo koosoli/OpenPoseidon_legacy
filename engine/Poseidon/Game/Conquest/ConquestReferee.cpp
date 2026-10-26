@@ -12,6 +12,7 @@
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
+#include <Poseidon/IO/Serialization/ParamArchive.hpp>
 #include <Poseidon/Network/NetworkIface.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/UI/InGame/InGameUI.hpp>
@@ -141,6 +142,42 @@ Referee& R()
     static Referee r;
     return r;
 }
+
+// The war as a loaded save holds it, until Simulate has the mission's CfgConquest to continue it in.
+struct Saved
+{
+    bool loaded = false; // a save was loaded since the last Simulate
+    bool valid = false;  // ... and it held a war
+    std::string mission;
+    bool started = false;
+    bool ended = false;
+    std::vector<ObjectiveState> states;
+    std::array<float, MaxSides> pool{};
+    std::array<float, MaxSides> score{};
+    std::array<bool, MaxSides> defeated{};
+    std::array<float, MaxSides> lastPlan{};
+    std::array<int, MaxSides> live{};
+    std::array<int, MaxSides> losses{};
+    std::array<int, MaxSides> bought{};
+    std::vector<GroupRecord> groups;
+    std::vector<UnitRecord> units;
+    int nextGroupId = 1;
+    int playerSide = NoSide;
+    OLink<Person> commanderBody;
+    bool possession = true;
+    bool viewOpen = false;
+    float lastTick = -1.0f;
+    float lastStatus = -1.0e9f;
+    std::deque<std::string> log;
+};
+
+Saved& Pending()
+{
+    static Saved s;
+    return s;
+}
+
+void ContinueSavedWar(Referee& r, const std::string& mission);
 
 // A bar that is neither full for its owner nor an untouched neutral: someone is taking it.
 bool InProgress(const ObjectiveState& s)
@@ -1135,13 +1172,16 @@ void Simulate()
     if (!GWorld || GWorld->GetMode() != GModeArcade || !GWorld->GetGameState() || !GLandscape)
         return;
     const std::string mission(static_cast<const char*>(GetMissionDirectory()));
-    if (mission != r.mission)
+    if (mission != r.mission || Pending().loaded)
     {
-        const std::string previous = r.mission;
+        // A new mission, or a loaded save (whose war, if it had one, goes on from the save).
         r = Referee();
         r.mission = mission;
         if (const ParamEntry* cfg = ExtParsMission.FindEntry("CfgConquest"); cfg && cfg->IsClass())
             r.active = LoadConfig(r, *cfg);
+        if (r.active)
+            ContinueSavedWar(r, mission);
+        Pending() = Saved();
         r.snapshot.active = r.active;
     }
     if (!r.active)
@@ -1152,9 +1192,9 @@ void Simulate()
         r.lastTick = now;
     if (now < r.lastTick - 1.0f)
     {
-        // A loaded save or a restart: the war's state is not saved yet (Slice 1), so stop rather
-        // than run it against a world that no longer matches.
-        WarLog("game time went backwards (save loaded?); Conquest stops until the mission restarts");
+        // Loads arrive through Pending() above; time running backwards otherwise means a world this
+        // war's record does not describe, so stop rather than run it against that.
+        WarLog("game time went backwards; Conquest stops until the mission restarts");
         r.active = false;
         r.snapshot.active = false;
         return;
@@ -1174,6 +1214,232 @@ void Simulate()
 const Snapshot& GetSnapshot()
 {
     return R().snapshot;
+}
+
+// ---- saved games -------------------------------------------------------------------------
+
+namespace
+{
+std::string Key(const char* prefix, size_t i)
+{
+    return prefix + std::to_string(i);
+}
+
+// Opens (saving: creates) the subclass `name`; false when a load does not find it.
+bool Open(ParamArchive& ar, const std::string& name, ParamArchive& sub)
+{
+    return ar.OpenSubclass(RStringB(name.c_str()), sub);
+}
+
+LSError SerializeText(ParamArchive& ar, const char* name, std::string& value)
+{
+    RString text(value.c_str());
+    PARAM_CHECK(ar.Serialize(name, text, 1, RString()))
+    value = static_cast<const char*>(text);
+    return LSOK;
+}
+
+// Both load passes read everything (references resolve in the second); saving writes it once.
+LSError SerializeSaved(ParamArchive& ar, Saved& w)
+{
+    PARAM_CHECK(SerializeText(ar, "mission", w.mission))
+    PARAM_CHECK(ar.Serialize("started", w.started, 1, false))
+    PARAM_CHECK(ar.Serialize("ended", w.ended, 1, false))
+    PARAM_CHECK(ar.Serialize("nextGroupId", w.nextGroupId, 1, 1))
+    PARAM_CHECK(ar.Serialize("playerSide", w.playerSide, 1, NoSide))
+    PARAM_CHECK(ar.SerializeRef("commanderBody", w.commanderBody, 1))
+    PARAM_CHECK(ar.Serialize("possession", w.possession, 1, true))
+    PARAM_CHECK(ar.Serialize("viewOpen", w.viewOpen, 1, false))
+    PARAM_CHECK(ar.Serialize("lastTick", w.lastTick, 1, -1.0f))
+    PARAM_CHECK(ar.Serialize("lastStatus", w.lastStatus, 1, -1.0e9f))
+
+    for (size_t s = 0; s < MaxSides; s++)
+    {
+        ParamArchive sub;
+        if (!Open(ar, Key("side", s), sub))
+            continue;
+        bool defeated = w.defeated[s];
+        PARAM_CHECK(sub.Serialize("pool", w.pool[s], 1, 0.0f))
+        PARAM_CHECK(sub.Serialize("score", w.score[s], 1, 0.0f))
+        PARAM_CHECK(sub.Serialize("defeated", defeated, 1, false))
+        PARAM_CHECK(sub.Serialize("lastPlan", w.lastPlan[s], 1, 0.0f))
+        PARAM_CHECK(sub.Serialize("live", w.live[s], 1, 0))
+        PARAM_CHECK(sub.Serialize("losses", w.losses[s], 1, 0))
+        PARAM_CHECK(sub.Serialize("bought", w.bought[s], 1, 0))
+        w.defeated[s] = defeated;
+        ar.CloseSubclass(sub);
+    }
+
+    int count = static_cast<int>(w.states.size());
+    PARAM_CHECK(ar.Serialize("objectives", count, 1, 0))
+    w.states.resize(static_cast<size_t>(std::max(count, 0)));
+    for (size_t o = 0; o < w.states.size(); o++)
+    {
+        ParamArchive sub;
+        if (!Open(ar, Key("objective", o), sub))
+            continue;
+        ObjectiveState& s = w.states[o];
+        PARAM_CHECK(sub.Serialize("owner", s.owner, 1, NoSide))
+        PARAM_CHECK(sub.Serialize("holder", s.holder, 1, NoSide))
+        PARAM_CHECK(sub.Serialize("level", s.level, 1, 0.0f))
+        PARAM_CHECK(sub.Serialize("contested", s.contested, 1, false))
+        PARAM_CHECK(sub.Serialize("capturedAt", s.capturedAt, 1, -1.0e9f))
+        PARAM_CHECK(sub.Serialize("lastHitAt", s.lastHitAt, 1, -1.0e9f))
+        ar.CloseSubclass(sub);
+    }
+
+    count = static_cast<int>(w.groups.size());
+    PARAM_CHECK(ar.Serialize("groups", count, 1, 0))
+    w.groups.resize(static_cast<size_t>(std::max(count, 0)));
+    for (size_t i = 0; i < w.groups.size(); i++)
+    {
+        ParamArchive sub;
+        if (!Open(ar, Key("group", i), sub))
+            continue;
+        GroupRecord& g = w.groups[i];
+        int task = static_cast<int>(g.task);
+        PARAM_CHECK(sub.Serialize("id", g.id, 1, 0))
+        PARAM_CHECK(sub.Serialize("side", g.side, 1, NoSide))
+        PARAM_CHECK(sub.SerializeRef("group", g.group, 1))
+        PARAM_CHECK(sub.Serialize("task", task, 1, 0))
+        PARAM_CHECK(sub.Serialize("objective", g.objective, 1, -1))
+        PARAM_CHECK(sub.Serialize("destination", g.destination, 1, VZero))
+        PARAM_CHECK(sub.Serialize("orderedAt", g.orderedAt, 1, -1.0e9f))
+        PARAM_CHECK(sub.Serialize("bestDistance", g.bestDistance, 1, 1.0e9f))
+        PARAM_CHECK(sub.Serialize("bestAt", g.bestAt, 1, 0.0f))
+        PARAM_CHECK(sub.Serialize("stalled", g.stalled, 1, false))
+        PARAM_CHECK(sub.Serialize("lockedUntil", g.lockedUntil, 1, -1.0e9f))
+        PARAM_CHECK(sub.Serialize("type", g.type, 1, 0))
+        g.task = static_cast<TaskKind>(task);
+        ar.CloseSubclass(sub);
+    }
+
+    count = static_cast<int>(w.units.size());
+    PARAM_CHECK(ar.Serialize("units", count, 1, 0))
+    w.units.resize(static_cast<size_t>(std::max(count, 0)));
+    for (size_t i = 0; i < w.units.size(); i++)
+    {
+        ParamArchive sub;
+        if (!Open(ar, Key("unit", i), sub))
+            continue;
+        UnitRecord& u = w.units[i];
+        PARAM_CHECK(sub.SerializeRef("unit", u.unit, 1))
+        PARAM_CHECK(sub.Serialize("side", u.side, 1, NoSide))
+        PARAM_CHECK(sub.Serialize("lastDamage", u.lastDamage, 1, 0.0f))
+        PARAM_CHECK(sub.Serialize("deadAt", u.deadAt, 1, -1.0f))
+        PARAM_CHECK(sub.Serialize("vehicle", u.vehicle, 1, false))
+        ar.CloseSubclass(sub);
+    }
+
+    count = static_cast<int>(w.log.size());
+    PARAM_CHECK(ar.Serialize("logLines", count, 1, 0))
+    w.log.resize(static_cast<size_t>(std::max(count, 0)));
+    for (size_t i = 0; i < w.log.size(); i++)
+        PARAM_CHECK(SerializeText(ar, Key("log", i).c_str(), w.log[i]))
+    return LSOK;
+}
+
+// Simulate, with the mission's config read again: the saved war goes on where it was.
+void Restore(Referee& r, const Saved& w)
+{
+    if (w.states.size() != r.war.defs.size())
+    {
+        WarLog("the saved war does not fit this mission's objectives; Conquest stops");
+        r.active = false;
+        return;
+    }
+    r.started = w.started;
+    r.ended = w.ended;
+    r.war.states = w.states;
+    r.war.pool = w.pool;
+    r.war.score = w.score;
+    r.war.defeated = w.defeated;
+    r.lastPlan = w.lastPlan;
+    r.live = w.live;
+    r.losses = w.losses;
+    r.bought = w.bought;
+    r.groups = w.groups;
+    r.units = w.units;
+    r.nextGroupId = w.nextGroupId;
+    r.playerSide = w.playerSide;
+    r.commanderBody = w.commanderBody;
+    r.config.possession = w.possession;
+    r.lastTick = w.lastTick;
+    r.lastStatus = w.lastStatus;
+    r.snapshot.log = w.log;
+    for (int s = 0; s < r.war.sideCount; s++)
+        r.replan[s] = true;
+    WarLog("the saved war goes on");
+    Status(r); // the war as restored, before it moves again
+}
+
+void ContinueSavedWar(Referee& r, const std::string& mission)
+{
+    Saved& w = Pending();
+    if (w.valid && w.mission == mission)
+    {
+        Restore(r, w);
+        // Saved with the commander view open: the save holds its camera, not the view. Open it anew.
+        if (r.active && w.viewOpen && !View::Active())
+        {
+            if (GWorld)
+                GWorld->SetCameraEffect(nullptr);
+            View::SetActive(true);
+        }
+    }
+}
+} // namespace
+
+LSError Serialize(ParamArchive& ar)
+{
+    if (ar.IsSaving())
+    {
+        const Referee& r = R();
+        if (!r.active)
+            return LSOK;
+        Saved w;
+        w.mission = r.mission;
+        w.started = r.started;
+        w.ended = r.ended;
+        w.states = r.war.states;
+        w.pool = r.war.pool;
+        w.score = r.war.score;
+        w.defeated = r.war.defeated;
+        w.lastPlan = r.lastPlan;
+        w.live = r.live;
+        w.losses = r.losses;
+        w.bought = r.bought;
+        w.groups = r.groups;
+        w.units = r.units;
+        w.nextGroupId = r.nextGroupId;
+        w.playerSide = r.playerSide;
+        w.commanderBody = r.commanderBody;
+        w.possession = r.config.possession;
+        w.viewOpen = View::Active();
+        w.lastTick = r.lastTick;
+        w.lastStatus = r.lastStatus;
+        w.log = r.snapshot.log;
+        ParamArchive sub;
+        if (!ar.OpenSubclass("Conquest", sub))
+        {
+            ar.OnError(LSNoEntry, "Conquest");
+            return LSNoEntry;
+        }
+        PARAM_CHECK(SerializeSaved(sub, w))
+        ar.CloseSubclass(sub);
+        return LSOK;
+    }
+    Saved& w = Pending();
+    if (ar.GetPass() == ParamArchive::PassFirst)
+        w = Saved();
+    w.loaded = true;
+    ParamArchive sub;
+    if (!ar.OpenSubclass("Conquest", sub))
+        return LSOK; // a save without a war (or from before the war began): the mission starts it afresh
+    PARAM_CHECK(SerializeSaved(sub, w))
+    ar.CloseSubclass(sub);
+    w.valid = ar.GetPass() == ParamArchive::PassSecond;
+    return LSOK;
 }
 
 namespace
