@@ -2,6 +2,7 @@
 #include <Poseidon/Game/Conquest/ConquestReferee.hpp>
 #include <Poseidon/Game/Conquest/ConquestView.hpp>
 #include <Poseidon/Game/Conquest/ConquestLlm.hpp>
+#include <Poseidon/Dev/NpcChat/NpcChat.hpp>
 
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AICenter.hpp>
@@ -99,6 +100,7 @@ struct GroupRecord
     int supplyPin = -1;          // ... the base the commander sent it to (else the neediest)
     bool supplyDuty = false;     // a fighting squad the commander put on supply runs
     bool truckless = false;      // a supply squad whose truck is gone: it fights on foot
+    bool ferry = false;          // an AI air assault's helicopter flying home after unloading (its pilot's group)
     std::string engageName;      // the building or vehicle the commander told it to attack
     std::string netDoing;        // a client: what the server says it is doing
     int nudges = 0;
@@ -240,6 +242,7 @@ struct Referee
     War war;
     std::vector<GroupRecord> groups;
     std::vector<UnitRecord> units;
+    std::map<int, float> aiBoughtAt; // objective -> when an AI commander last bought a squad there
     std::array<float, MaxSides> lastPlan{};
     std::array<bool, MaxSides> replan{};
     std::array<int, MaxSides> live{};
@@ -1353,6 +1356,7 @@ bool InContact(const Referee& r, int side, const Vector3& pos)
 
 void TrackGroups(Referee& r, float now)
 {
+    std::vector<GroupRecord> born; // helicopters sent home: added after the loop (it holds references)
     for (size_t i = 0; i < r.groups.size();)
     {
         GroupRecord& rec = r.groups[i];
@@ -1362,6 +1366,12 @@ void TrackGroups(Referee& r, float now)
             if (grp && grp->NUnits() == 0)
                 grp->RemoveFromCenter();
             r.groups.erase(r.groups.begin() + static_cast<std::ptrdiff_t>(i));
+            continue;
+        }
+        if (rec.ferry)
+        {
+            TrackFerry(r, rec, now);
+            i++;
             continue;
         }
         // Mounted squads get out once they are close: a truck is not a place to fight from. Tank and
@@ -1384,7 +1394,10 @@ void TrackGroups(Referee& r, float now)
             for (int id = 1; id <= MAX_UNITS_PER_GROUP; id++)
                 if (AIUnit* unit = grp->UnitWithID(id); unit && unit->GetVehicleIn() == heli && heli->Driver() != unit->GetPerson())
                     aboard = true;
-            if (!aboard)
+            GroupRecord ferry;
+            if (!aboard && !Human(r, rec.side) && SendHelicopterHome(r, rec, heli, now, ferry))
+                born.push_back(ferry);
+            else if (!aboard)
             {
                 heli->LandStarted(Transport::LMLand);
                 rec.parkedHeli = true;
@@ -1532,6 +1545,8 @@ void TrackGroups(Referee& r, float now)
         }
         i++;
     }
+    for (GroupRecord& ferry : born)
+        r.groups.push_back(std::move(ferry));
 }
 
 SideView BuildView(Referee& r, int side, float now)
@@ -1568,8 +1583,8 @@ SideView BuildView(Referee& r, int side, float now)
         }
     for (const GroupRecord& rec : r.groups)
     {
-        if (rec.side != side || IsSupply(r, rec))
-            continue; // supply squads run the supply line, not the planner's tasks
+        if (rec.side != side || IsSupply(r, rec) || rec.ferry)
+            continue; // supply squads run the supply line, not the planner's tasks (nor does a helicopter going home)
         AIGroup* grp = rec.group;
         if (!grp || !grp->Leader())
             continue;
@@ -1585,6 +1600,12 @@ SideView BuildView(Referee& r, int side, float now)
         g.objective = rec.objective;
         g.stalled = rec.stalled;
         g.locked = now < rec.lockedUntil || grp->IsAnyPlayerGroup();
+        if (rec.type >= 0 && rec.type < static_cast<int>(r.config.squads.size()))
+        {
+            const SquadDef& def = r.config.squads[rec.type];
+            g.crew = def.mounted;
+            g.airborne = def.role == "gunship" || (def.role == "air" && !rec.parkedHeli);
+        }
         v.groups.push_back(g);
     }
     return v;
@@ -1671,8 +1692,14 @@ void Plan(Referee& r, int side, float now)
         tuning.garrisonMen = 12.0f;
     }
     std::vector<Intent> intents = PlanStandard(view, tuning);
+    // The supply line keeps its trucks under a human commander too: it was only the AI's, and a side the
+    // player commands (from the first tick, with the commander view on) had no supply runs at all (owner,
+    // 2026-10-26). The commander can still buy more, pin them, or put squads on supply runs.
+    KeepSupplyTrucks(r, side, now);
+    // Fire support before purchases: called after them, it found the pool spent on squads and the AI used
+    // its mortars and plane almost never (owner, 2026-10-26: none in an 80-minute soak).
     if (!Human(r, side))
-        KeepSupplyTrucks(r, side, now);
+        AiBarrage(r, side, now);
     std::map<std::pair<int, int>, std::vector<int>> radioed; // (task, objective) -> squads newly given it
     for (Intent& intent : intents)
     {
@@ -1688,6 +1715,10 @@ void Plan(Referee& r, int side, float now)
                 continue;
             }
             int base = intent.objective;
+            // One squad a base every 30 s: rich at the start, the AI bought a dozen at once and they jammed
+            // the roads out of their HQ (soak, 2026-10-26).
+            if (const auto it = r.aiBoughtAt.find(base); it != r.aiBoughtAt.end() && now >= it->second && now - it->second < 30.0f)
+                continue;
             int type = ChooseSquadType(r, side, base);
             if (type < 0 && base != HqOf(r, side) && HqOf(r, side) >= 0 &&
                 SpawnEligible(r.war, side, HqOf(r, side), now, r.tuning))
@@ -1698,8 +1729,11 @@ void Plan(Referee& r, int side, float now)
             if (type < 0)
                 continue;
             intent.objective = base;
+            if (const auto it = r.aiBoughtAt.find(base); it != r.aiBoughtAt.end() && now >= it->second && now - it->second < 30.0f)
+                continue; // the HQ, taking over from a front base without supplies, bought one just now
             if (SpawnSquad(r, side, base, false, type))
             {
+                r.aiBoughtAt[base] = now;
                 WarLog(Name(side) + " bought a " + r.config.squads[type].name + " at " +
                        r.war.defs[intent.objective].name + " (" + intent.why + ")");
                 if (r.llmBuy[side] == r.config.squads[type].name)
@@ -1739,8 +1773,6 @@ void Plan(Referee& r, int side, float now)
             break;
         }
     }
-    if (!Human(r, side))
-        AiBarrage(r, side, now);
     if (!Human(r, side))
         for (const auto& [what, ids] : radioed)
         {
@@ -2122,6 +2154,7 @@ std::string Doing(const Referee& r, const GroupRecord& rec);
 std::string PlayerName(Person* p);
 int Electorate(const Referee& r, int side);
 bool ClaimCommand(Referee& r, int side, Person* who, bool on, std::string* why);
+void ReleaseCommand(Referee& r, int side);
 void StepVotes(Referee& r, float now);
 
 #include "ConquestRefereeNet.inc"
@@ -2496,78 +2529,6 @@ void StepBuyQueue(Referee& r, float now)
     }
 }
 
-// An AI commander's mortars: on a cluster of known enemies at an objective it is attacking or that
-// is threatened, never near its own men, and only with supplies to spare for reinforcements.
-void AiBarrage(Referee& r, int side, float now)
-{
-    if (SupportWait(r, now) > 0.0f)
-        return;
-    const float reserve = r.config.squads.empty() ? 0.0f : r.config.squads[0].cost;
-    const bool mortars = r.config.barrageShells > 0 && now >= r.lastBarrage[side] + r.config.barrageCooldown &&
-                         r.war.pool[side] >= r.config.barrageCost + reserve;
-    const bool plane = r.config.airBombs > 0 && now >= r.lastAir[side] + r.config.airCooldown &&
-                       r.war.pool[side] >= r.config.airCost + reserve &&
-                       std::none_of(r.strikes.begin(), r.strikes.end(), [side](const Strike& s) { return s.side == side; });
-    if (!mortars && !plane)
-        return;
-    std::vector<int> wanted(r.war.defs.size(), 0); // 2: the LLM named it, 1: attacked or threatened
-    for (const GroupRecord& rec : r.groups)
-        if (rec.side == side && rec.objective >= 0 && rec.objective < static_cast<int>(wanted.size()))
-            wanted[rec.objective] = std::max(wanted[rec.objective], 1);
-    if (r.llmBarrage[side] >= 0 && r.llmBarrage[side] < static_cast<int>(wanted.size()))
-        wanted[r.llmBarrage[side]] = 2;
-    const std::vector<Contact> enemies = KnownEnemies(side);
-    float bestScore = 0.0f, bx = 0.0f, by = 0.0f;
-    int bestObjective = -1;
-    for (const Contact& c : enemies)
-    {
-        if (c.age > 60.0f || c.height > 15.0f) // stale, or in the air
-            continue;
-        int objective = -1;
-        for (size_t o = 0; o < r.war.defs.size(); o++)
-            if (wanted[o] && std::hypot(c.x - r.war.defs[o].x, c.y - r.war.defs[o].y) <= r.war.defs[o].radius + 150.0f)
-                objective = static_cast<int>(o);
-        if (objective < 0)
-            continue;
-        float score = 0.0f;
-        for (const Contact& e : enemies)
-            if (e.age <= 60.0f && std::hypot(e.x - c.x, e.y - c.y) <= 60.0f)
-                score += e.vehicle ? 2.0f : 1.0f;
-        if (wanted[objective] == 2)
-            score += 1.0f;
-        if (score > bestScore)
-        {
-            bestScore = score;
-            bx = c.x;
-            by = c.y;
-            bestObjective = objective;
-        }
-    }
-    if (bestObjective < 0 || bestScore < 3.0f)
-        return;
-    // Never on its own men.
-    AICenter* center = GWorld->GetCenter(r.config.engineSide[side]);
-    for (int g = 0; center && g < center->NGroups(); g++)
-        if (AIGroup* grp = center->GetGroup(g))
-            for (int id = 1; id <= MAX_UNITS_PER_GROUP; id++)
-                if (AIUnit* unit = grp->UnitWithID(id); Alive(unit) && std::hypot(unit->Position().X() - bx, unit->Position().Z() - by) < 120.0f)
-                    return;
-    std::string why;
-    if (mortars && BarrageFor(r, side, bx, by, &why))
-    {
-        WarLog(Name(side) + " commander calls mortars on the enemy at " + r.war.defs[bestObjective].name);
-        if (r.llmBarrage[side] == bestObjective)
-            r.llmBarrage[side] = -1;
-    }
-    // The plane for what the mortars cannot reach or while they reload: worth it on armour or a crowd.
-    else if (plane && bestScore >= 4.0f && AirStrikeFor(r, side, bx, by, &why))
-    {
-        WarLog(Name(side) + " commander calls an air strike on the enemy at " + r.war.defs[bestObjective].name);
-        if (r.llmBarrage[side] == bestObjective)
-            r.llmBarrage[side] = -1;
-    }
-}
-
 // One line per finished war in the profile's conquest-history.txt.
 void RecordHistory(const Referee& r, float now)
 {
@@ -2931,6 +2892,7 @@ LSError SerializeSaved(ParamArchive& ar, Saved& w)
         PARAM_CHECK(sub.Serialize("type", g.type, 1, 0))
         PARAM_CHECK(sub.Serialize("onFoot", g.onFoot, 1, false))
         PARAM_CHECK(sub.Serialize("truckless", g.truckless, 1, false))
+        PARAM_CHECK(sub.Serialize("ferry", g.ferry, 1, false))
         PARAM_CHECK(sub.Serialize("parkedHeli", g.parkedHeli, 1, false))
         g.task = static_cast<TaskKind>(task);
         ar.CloseSubclass(sub);
@@ -3137,13 +3099,32 @@ namespace
 {
 // The human commander's order for these squads: attack or defend the objective at (x, y), or
 // move to the point. Locks them against the AI planner. Returns what was ordered, for the hint.
-// The squad leader answers on the side's radio, in his own voice ("Moving" / "Attacking").
-void VoiceConfirm(const GroupRecord& rec, bool attack)
+// The squad leader answers on the radio. With NPC chat's voices on, in his own voice and in words: "Bravo
+// copies, attacking Figari" (the owner did not hear the game's own confirmation, 2026-10-26); without them,
+// the game's radio ("Moving" / "Attacking"). `doing` replaces what the task says (a command from the bar).
+void VoiceConfirm(const GroupRecord& rec, bool attack, const std::string& doing = std::string())
 {
     AIGroup* grp = rec.group;
     AICenter* center = grp ? grp->GetCenter() : nullptr;
     if (!center || !grp->Leader() || grp->Leader()->GetLifeState() != AIUnit::LSAlive)
         return;
+    const Referee& r = R();
+    if (rec.side == r.playerSide && !IsMirror())
+    {
+        const std::string place =
+            rec.objective >= 0 && rec.objective < static_cast<int>(r.war.defs.size()) ? r.war.defs[rec.objective].name : "";
+        std::string what = doing;
+        if (what.empty())
+            what = !rec.engageName.empty() && rec.task == TaskKind::None ? "engaging the " + rec.engageName
+                   : rec.task == TaskKind::Attack && !place.empty()       ? "attacking " + place
+                   : rec.task == TaskKind::Defend && !place.empty()       ? "moving to hold " + place
+                   : rec.task == TaskKind::Move                           ? "moving to the marked point"
+                   : attack                                               ? "engaging"
+                                                                          : "on our way";
+        const std::string line = Callsign(rec.id) + " copies, " + what + ".";
+        if (NpcChat::SayOnRadio(Callsign(rec.id), rec.id * 7 + rec.side, line))
+            return;
+    }
     Command cmd;
     cmd._message = attack ? Command::Attack : Command::Move;
     cmd._destination = rec.destination;
@@ -3975,7 +3956,10 @@ void SetHumanCommander(bool on)
         return;
     if (!InMultiplayer())
     {
-        r.humanUntil[r.playerSide] = on ? 1.0e9f : -1.0e9f;
+        if (on)
+            r.humanUntil[r.playerSide] = 1.0e9f;
+        else
+            ReleaseCommand(r, r.playerSide);
         return;
     }
     // A hosting player: the seat, renewed by the tick while the view is open.
@@ -4151,6 +4135,8 @@ std::string Doing(const Referee& r, const GroupRecord& rec)
     const auto name = [&](int o)
     { return o >= 0 && o < static_cast<int>(r.war.defs.size()) ? r.war.defs[o].name : std::string("?"); };
     std::string text;
+    if (rec.ferry)
+        return rec.landing ? "Helicopter landing at the HQ" : "Helicopter flying back to the HQ";
     if (IsSupply(r, rec))
     {
         if (rec.supplyState == 1)

@@ -51,6 +51,10 @@ std::string StatusLine();  // "Thinking...", "Listening...", last error
 const std::deque<TranscriptLine>& Transcript();
 void ClearConversation();
 void StopSpeech();
+/// Say `text` over the radio as someone outside the player's squad (a Conquest squad leader answering
+/// the commander): a voice from the pool picked by `voiceSeed`, through the radio filter. False when
+/// speech is off (the caller then uses the game's own radio).
+bool SayOnRadio(const std::string& name, int voiceSeed, const std::string& text);
 /// "Stop waiting": abort the request in flight.
 void CancelRequest();
 

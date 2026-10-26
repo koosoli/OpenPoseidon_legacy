@@ -4162,6 +4162,26 @@ void RegisterKeyInjection(HarnessServer& hs)
             if (!SDL_PushEvent(&event)) return HarnessProtocol::ErrorResponse("mouse event rejected");
             return HarnessProtocol::OkResponse();
         });
+    hs.RegisterCommand({"mouse_wheel", "Inject an SDL mouse wheel step at a window position",
+                        {{"steps","int",true},{"x","int",true},{"y","int",true}}},
+        [](const std::string&, cJSON* root) -> std::string {
+            const int steps = HarnessProtocol::GetInt(root, "steps");
+            const int x = HarnessProtocol::GetInt(root, "x");
+            const int y = HarnessProtocol::GetInt(root, "y");
+            if (steps < -20 || steps > 20 || steps == 0)
+                return HarnessProtocol::ErrorResponse("wheel steps out of range");
+            if (!GEngine || x < 0 || y < 0 || x >= GEngine->Width() || y >= GEngine->Height())
+                return HarnessProtocol::ErrorResponse("window position out of range");
+            SDL_Event event{};
+            event.type = SDL_EVENT_MOUSE_WHEEL;
+            event.wheel.windowID = HarnessInputWindow();
+            event.wheel.y = static_cast<float>(steps);
+            event.wheel.direction = SDL_MOUSEWHEEL_NORMAL;
+            event.wheel.mouse_x = static_cast<float>(x);
+            event.wheel.mouse_y = static_cast<float>(y);
+            if (!SDL_PushEvent(&event)) return HarnessProtocol::ErrorResponse("mouse event rejected");
+            return HarnessProtocol::OkResponse();
+        });
     hs.RegisterCommand({"mouse_button", "Inject SDL mouse button state", {{"button","int",true},{"down","bool",true}}},
         [](const std::string&, cJSON* root) -> std::string {
             const int button = HarnessProtocol::GetInt(root,"button");

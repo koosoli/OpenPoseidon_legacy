@@ -170,7 +170,7 @@ int BuySquad(int base, int type, std::string* reason = nullptr);
 
 struct Contact
 {
-    float x = 0.0f, y = 0.0f, height = 0.0f;
+    float x = 0.0f, y = 0.0f, height = 0.0f; // height: above sea level (the view draws at it)
     float age = 0.0f; // seconds since last seen
     bool vehicle = false;
 };
@@ -220,7 +220,7 @@ struct Options
     bool hqRadio = true;           // the AI commander radios its orders while the player does not command
     std::array<bool, MaxSides> llmCommander{}; // the side's commander asks an LLM for its priorities (Hybrid)
     bool resistance = false;       // a war with a third side: it takes part (off: its base is a neutral village)
-    std::array<float, MaxSides> startPool{500.0f, 500.0f, 500.0f}; // each side's supplies when the war begins
+    std::array<float, MaxSides> startPool{2000.0f, 2000.0f, 2000.0f}; // each side's supplies when the war begins
     int victoryTowns = 0;          // a side holding this many villages (HQs not counted) wins; 0: off
     int timeLimit = 0;             // minutes of war; then the higher war score wins. 0: off
     bool resistanceAlly = false;   // the Resistance fights with WEST (with resistance on)

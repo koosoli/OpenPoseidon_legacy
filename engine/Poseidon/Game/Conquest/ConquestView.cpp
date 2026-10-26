@@ -538,8 +538,53 @@ void ToggleSelected(int id)
         sel.erase(it);
 }
 
+// The living soldiers of squad `id`, its leader first: the selection bar's soldier buttons and Tab.
+std::vector<Person*> SquadSoldiers(int id)
+{
+    std::vector<Person*> out;
+    ForEachGroup(
+        [&](const LiveGroup& g)
+        {
+            if (g.id != id || !g.group)
+                return;
+            AIUnit* leader = g.group->Leader();
+            if (leader && leader->GetLifeState() == AIUnit::LSAlive && leader->GetPerson())
+                out.push_back(leader->GetPerson());
+            for (int u = 1; u <= MAX_UNITS_PER_GROUP; u++)
+                if (AIUnit* unit = g.group->UnitWithID(u);
+                    unit && unit != leader && unit->GetLifeState() == AIUnit::LSAlive && unit->GetPerson())
+                    out.push_back(unit->GetPerson());
+        });
+    return out;
+}
+
+// One soldier in focus: "Take control" becomes him, and the camera follows him (or the vehicle he sits in).
+void FocusSoldier(Person* soldier)
+{
+    State& s = St();
+    s.unit = soldier;
+    AIUnit* unit = soldier ? soldier->Brain() : nullptr;
+    s.follow = unit && unit->GetVehicleIn() ? static_cast<EntityAI*>(unit->GetVehicleIn()) : static_cast<EntityAI*>(soldier);
+    if (s.distance > 120.0f)
+        s.distance = 120.0f;
+}
+
+// Tab: the next soldier of the (first) selected squad.
+void NextSoldier()
+{
+    State& s = St();
+    if (s.selected.empty())
+        return;
+    const std::vector<Person*> men = SquadSoldiers(s.selected.front());
+    if (men.empty())
+        return;
+    const auto it = std::find(men.begin(), men.end(), static_cast<Person*>(s.unit));
+    FocusSoldier(it == men.end() || it + 1 == men.end() ? men.front() : *(it + 1));
+}
+
 // A click selects the squad of the soldier (or vehicle) under the pointer, and that soldier: the
-// camera follows him and "Take control" becomes him.
+// camera follows him and "Take control" becomes him. A vehicle stands for its crew: the one of the
+// squad in it (its leader if he is aboard) is the soldier picked.
 void ClickSelect(float x, float y, bool add)
 {
     State& s = St();
@@ -604,6 +649,13 @@ void ClickSelect(float x, float y, bool add)
         ToggleSelected(best);
     else
         s.selected.push_back(best);
+    if (!soldier && vehicle)
+        for (Person* man : SquadSoldiers(best))
+            if (AIUnit* unit = man->Brain(); unit && unit->GetVehicleIn() == vehicle)
+            {
+                soldier = man; // the first is the leader, when he is aboard
+                break;
+            }
     s.unit = soldier;
     if (soldier)
         s.follow = soldier;
@@ -2565,6 +2617,28 @@ void DrawCommandBar(const std::vector<SquadDraw>& squads)
                 if (ImGui::Button(s.unit ? "Take control  T" : "Lead squad  T"))
                     TakeControl();
             }
+            // One squad: its soldiers, to focus on any of them (Tab steps through them) and take control of him.
+            if (s.selected.size() == 1)
+            {
+                const std::vector<Person*> men = SquadSoldiers(s.selected.front());
+                ImGui::SameLine(0.0f, 14.0f);
+                Label(Font().body, 13.0f, ColMuted, "Soldiers (Tab):");
+                for (size_t i = 0; i < men.size(); i++)
+                {
+                    ImGui::SameLine(0.0f, 4.0f);
+                    const bool current = men[i] == static_cast<Person*>(s.unit);
+                    if (current)
+                        ImGui::PushStyleColor(ImGuiCol_Button, ColSelect);
+                    const std::string label = (i == 0 ? std::string("L") : std::to_string(i + 1)) + "##soldier" + std::to_string(i);
+                    if (ImGui::SmallButton(label.c_str()))
+                        FocusSoldier(men[i]);
+                    if (current)
+                        ImGui::PopStyleColor();
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("%s%s", static_cast<const char*>(men[i]->GetDisplayName()),
+                                          IsHumanPlayer(men[i]) ? " (a player)" : i == 0 ? " (leader)" : "");
+                }
+            }
             ImGui::SameLine(0.0f, 6.0f);
             if (ImGui::Button("Deselect"))
             {
@@ -2626,6 +2700,8 @@ void DrawCommandBar(const std::vector<SquadDraw>& squads)
             KeyCap(draw, "B", "Deploy");
             ImGui::SameLine(0.0f, 12.0f);
             KeyCap(draw, "C", "Me");
+            ImGui::SameLine(0.0f, 12.0f);
+            KeyCap(draw, "Tab", "Next soldier");
             ImGui::SameLine(0.0f, 12.0f);
             KeyCap(draw, "Ctrl M", "Leave");
         }
@@ -2951,6 +3027,8 @@ bool ProcessEvent(const SDL_Event& event)
             if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.scancode == SDL_SCANCODE_T &&
                 PossessionAllowed() && !s.selected.empty())
                 TakeControl();
+            if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.scancode == SDL_SCANCODE_TAB)
+                NextSoldier();
             if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.scancode == SDL_SCANCODE_B)
                 s.deployOpen = !s.deployOpen;
             if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.scancode == SDL_SCANCODE_H)
@@ -2985,37 +3063,55 @@ bool ProcessEvent(const SDL_Event& event)
                 const float floor = followed ? std::max(FollowMinDistance, followed->GetRadius() * 1.1f) : MinDistance;
                 const float before = s.distance;
                 s.distance = std::clamp(s.distance * std::pow(0.85f, steps), floor, MaxDistance);
-                // What the zoom closes in on: a selected soldier or squad first (a followed one stays centred);
-                // with nothing selected, where the cursor points -- the ground under it stays under it.
+                // What the zoom closes in on: a selected soldier or squad first, while it is on screen (a followed
+                // one stays centred); else where the cursor points. Only zooming IN moves the camera, and by at
+                // most a third of its distance a step: zooming out (which slid the camera away from the cursor)
+                // and a cursor near the horizon (ground kilometres off) or a selection long scrolled out of view
+                // made the wheel move the camera rather than zoom (owner, 2026-10-26).
                 float gx = 0.0f, gy = 0.0f;
                 bool onSelection = false;
                 if (!followed && !s.selected.empty())
                 {
-                    Person* picked = s.unit;
-                    if (picked)
+                    Vector3 at;
+                    bool known = false;
+                    if (Person* picked = s.unit)
                     {
-                        gx = picked->Position().X();
-                        gy = picked->Position().Z();
-                        onSelection = true;
+                        at = picked->Position();
+                        known = true;
                     }
                     else
                         ForEachGroup(
                             [&](const LiveGroup& g)
                             {
-                                if (!onSelection && g.id == s.selected.front() && g.group && g.group->Leader())
+                                if (!known && g.id == s.selected.front() && g.group && g.group->Leader())
                                 {
-                                    gx = g.group->Leader()->Position().X();
-                                    gy = g.group->Leader()->Position().Z();
-                                    onSelection = true;
+                                    at = g.group->Leader()->Position();
+                                    known = true;
                                 }
                             });
+                    const ImGuiIO& io = ImGui::GetIO();
+                    ScreenPoint p;
+                    if (known && Project(at, p) && p.x >= 0.0f && p.y >= 0.0f && p.x <= io.DisplaySize.x &&
+                        p.y <= io.DisplaySize.y)
+                    {
+                        gx = at.X();
+                        gy = at.Z();
+                        onSelection = true;
+                    }
                 }
-                if (!followed && s.distance != before &&
+                if (!followed && s.distance < before &&
                     (onSelection || GroundAt(event.wheel.mouse_x, event.wheel.mouse_y, gx, gy)))
                 {
                     const float t = 1.0f - s.distance / before;
-                    s.focusX += (gx - s.focusX) * t;
-                    s.focusY += (gy - s.focusY) * t;
+                    float dx = (gx - s.focusX) * t, dy = (gy - s.focusY) * t;
+                    const float step = std::hypot(dx, dy), most = before / 3.0f;
+                    if (step > most)
+                    {
+                        dx *= most / step;
+                        dy *= most / step;
+                    }
+                    s.focusX += dx;
+                    s.focusY += dy;
                 }
             }
             return true;
@@ -3095,6 +3191,19 @@ bool PlaceCamera(float x, float y, float distance, float pitch, float yawDegrees
     s.distance = std::clamp(distance, MinDistance, MaxDistance);
     s.pitch = std::clamp(pitch, MinPitch, MaxPitch);
     s.yaw = yawDegrees * Pi / 180.0f;
+    return true;
+}
+
+bool CameraState(float& x, float& y, float& distance, Person** focused)
+{
+    const State& s = St();
+    if (!s.active)
+        return false;
+    x = s.focusX;
+    y = s.focusY;
+    distance = s.distance;
+    if (focused)
+        *focused = s.unit;
     return true;
 }
 
@@ -3259,8 +3368,27 @@ static GameValue ConquestCameraUnary(const GameState*, GameValuePar oper1)
                                     static_cast<float>(a[2])));
 }
 
+// conquestCameraState: [x, y, distance, soldier] of the commander view's camera and the soldier in focus
+// (objNull for none), [] while the view is closed (tests).
+static GameValue ConquestCameraStateNular(const GameState* gs)
+{
+    GameValue out = gs->CreateGameValue(GameArray);
+    float x = 0.0f, y = 0.0f, distance = 0.0f;
+    Person* focused = nullptr;
+    if (Poseidon::Conquest::View::CameraState(x, y, distance, &focused))
+    {
+        GameArrayType& a = out;
+        a.Add(GameValue(x));
+        a.Add(GameValue(y));
+        a.Add(GameValue(distance));
+        a.Add(GameValueExt(static_cast<Object*>(focused)));
+    }
+    return out;
+}
+
 INIT_MODULE(ConquestView, 3)
 {
+    GGameState.NewNularOp(GameNular(GameArray, "conquestCameraState", ConquestCameraStateNular));
     GGameState.NewFunction(GameFunction(GameBool, "conquestCamera", ConquestCameraUnary, GameArray));
     GGameState.NewFunction(GameFunction(GameBool, "conquestCommanderView", ConquestCommanderViewUnary, GameBool));
 };

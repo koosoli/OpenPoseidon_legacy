@@ -28,6 +28,26 @@ int Electorate(const Referee& r, int side)
     return std::max(n, 1);
 }
 
+// Nobody commands `side` any more: the AI commander takes over at once. Squads the human ordered were held
+// to that order for HumanLockSeconds and the planner waited for its next round, so leaving the command view
+// looked like nobody took over (owner, 2026-10-26). Supply runs stay as they are.
+void ReleaseCommand(Referee& r, int side)
+{
+    if (r.humanUntil[side] > Now())
+        WarLog(Name(side) + " is back under the AI commander");
+    r.humanUntil[side] = -1.0e9f;
+    for (GroupRecord& rec : r.groups)
+    {
+        if (rec.side != side || IsSupply(r, rec) || rec.lockedUntil <= Now())
+            continue;
+        rec.lockedUntil = -1.0e9f;
+        if (rec.task == TaskKind::Move)
+            rec.task = TaskKind::None;
+        rec.engageName.clear();
+    }
+    r.replan[side] = true;
+}
+
 // `who` takes (on) or gives up (off) command of `side`. In multiplayer one player holds it at a time.
 bool ClaimCommand(Referee& r, int side, Person* who, bool on, std::string* why)
 {
@@ -35,7 +55,10 @@ bool ClaimCommand(Referee& r, int side, Person* who, bool on, std::string* why)
         return false;
     if (!InMultiplayer())
     {
-        r.humanUntil[side] = on ? 1.0e9f : -1.0e9f;
+        if (on)
+            r.humanUntil[side] = 1.0e9f;
+        else
+            ReleaseCommand(r, side);
         return true;
     }
     const float now = Now();
@@ -46,8 +69,7 @@ bool ClaimCommand(Referee& r, int side, Person* who, bool on, std::string* why)
         if (holder == who)
         {
             r.seat[side] = nullptr;
-            r.humanUntil[side] = -1.0e9f;
-            WarLog(Name(side) + " is back under the AI commander");
+            ReleaseCommand(r, side);
         }
         return true;
     }

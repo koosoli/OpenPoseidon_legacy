@@ -208,6 +208,80 @@ int CommandSquadsFor(Referee& r, int side, const std::vector<int>& ids, SquadCom
     if (n)
         for (const GroupRecord& rec : r.groups)
             if (rec.id == ids.front())
-                VoiceConfirm(rec, command == SquadCommand::Engage);
+                VoiceConfirm(rec, command == SquadCommand::Engage, SquadCommandName(command));
     return n;
+}
+
+// An AI commander's mortars and plane: on a cluster of known enemies at an objective it is attacking or
+// that is threatened, never near its own men. Called before its purchases, so support gets the supplies first.
+void AiBarrage(Referee& r, int side, float now)
+{
+    if (SupportWait(r, now) > 0.0f)
+        return;
+    const bool mortars = r.config.barrageShells > 0 && now >= r.lastBarrage[side] + r.config.barrageCooldown &&
+                         r.war.pool[side] >= r.config.barrageCost;
+    const bool plane = r.config.airBombs > 0 && now >= r.lastAir[side] + r.config.airCooldown &&
+                       r.war.pool[side] >= r.config.airCost &&
+                       std::none_of(r.strikes.begin(), r.strikes.end(), [side](const Strike& s) { return s.side == side; });
+    if (!mortars && !plane)
+        return;
+    std::vector<int> wanted(r.war.defs.size(), 0); // 2: the LLM named it, 1: attacked or threatened
+    for (const GroupRecord& rec : r.groups)
+        if (rec.side == side && rec.objective >= 0 && rec.objective < static_cast<int>(wanted.size()))
+            wanted[rec.objective] = std::max(wanted[rec.objective], 1);
+    if (r.llmBarrage[side] >= 0 && r.llmBarrage[side] < static_cast<int>(wanted.size()))
+        wanted[r.llmBarrage[side]] = 2;
+    const std::vector<Contact> enemies = KnownEnemies(side);
+    float bestScore = 0.0f, bx = 0.0f, by = 0.0f;
+    int bestObjective = -1;
+    for (const Contact& c : enemies)
+    {
+        // Stale, or in the air: `height` is above sea level, so the ground's is taken off (it was not, and on
+        // Everon nearly every enemy stood over 15 m up: the AI never called its mortars or plane).
+        if (c.age > 60.0f || c.height - Ground(c.x, c.y).Y() > 15.0f)
+            continue;
+        int objective = -1;
+        for (size_t o = 0; o < r.war.defs.size(); o++)
+            if (wanted[o] && std::hypot(c.x - r.war.defs[o].x, c.y - r.war.defs[o].y) <= r.war.defs[o].radius + 300.0f)
+                objective = static_cast<int>(o);
+        if (objective < 0)
+            continue;
+        float score = 0.0f;
+        for (const Contact& e : enemies)
+            if (e.age <= 60.0f && std::hypot(e.x - c.x, e.y - c.y) <= 80.0f)
+                score += e.vehicle ? 2.0f : 1.0f;
+        if (wanted[objective] == 2)
+            score += 1.0f;
+        if (score > bestScore)
+        {
+            bestScore = score;
+            bx = c.x;
+            by = c.y;
+            bestObjective = objective;
+        }
+    }
+    // Two known enemies together are worth a barrage (a vehicle counts twice).
+    if (bestObjective < 0 || bestScore < 2.0f)
+        return;
+    // Never on its own men: none within 90 m of the point (the mortars land within 40 m with an observer near).
+    AICenter* center = GWorld->GetCenter(r.config.engineSide[side]);
+    for (int g = 0; center && g < center->NGroups(); g++)
+        if (AIGroup* grp = center->GetGroup(g))
+            for (int id = 1; id <= MAX_UNITS_PER_GROUP; id++)
+                if (AIUnit* unit = grp->UnitWithID(id); Alive(unit) && std::hypot(unit->Position().X() - bx, unit->Position().Z() - by) < 90.0f)
+                    return;
+    std::string why;
+    if (mortars && BarrageFor(r, side, bx, by, &why))
+    {
+        WarLog(Name(side) + " commander calls mortars on the enemy at " + r.war.defs[bestObjective].name);
+        if (r.llmBarrage[side] == bestObjective)
+            r.llmBarrage[side] = -1;
+    }
+    // The plane for what the mortars cannot reach or while they reload: worth it on armour or a crowd.
+    else if (plane && bestScore >= 3.0f && AirStrikeFor(r, side, bx, by, &why))
+    {
+        WarLog(Name(side) + " commander calls an air strike on the enemy at " + r.war.defs[bestObjective].name);
+        if (r.llmBarrage[side] == bestObjective)
+            r.llmBarrage[side] = -1;
+    }
 }

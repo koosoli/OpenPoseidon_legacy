@@ -88,7 +88,10 @@ bool LoadSettings(Options& o, int sideCount)
         {
             if (s >= MaxSides)
                 break;
-            if (const cJSON* pool = cJSON_GetObjectItemCaseSensitive(e, "startPool"); cJSON_IsNumber(pool))
+            // 500 was every side's default until 2026-10-26 (now the mission's, 2000): a profile that still holds
+            // it never chose it, and keeps the new default.
+            if (const cJSON* pool = cJSON_GetObjectItemCaseSensitive(e, "startPool");
+                cJSON_IsNumber(pool) && pool->valuedouble != 500.0)
                 o.startPool[s] = std::max(0.0f, static_cast<float>(pool->valuedouble));
             o.llmCommander[s] = flag(e, "llm", o.llmCommander[s]);
             if (const cJSON* model = cJSON_GetObjectItemCaseSensitive(e, "llmModel"); cJSON_IsString(model))

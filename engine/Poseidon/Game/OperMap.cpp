@@ -1582,7 +1582,8 @@ bool OperMap::FindPath(AIUnit* unit, int dir, int xs, int zs, int xe, int ze, bo
     if (!test)
     {
         // cannot plan operative path outside map
-        LOG_ERROR(Script, "Out of map");
+        LOG_ERROR(Script, "Out of map: {} plans from field {} {} to {} {}", unit ? (const char*)unit->GetDebugName() : "?",
+                  xs, zs, xe, ze);
 
         // error recovery - try to use simple path
         goto SimplePath;
@@ -1682,7 +1683,8 @@ bool OperMap::FindPath(AIUnit* unit, int dir, int xs, int zs, int xe, int ze, bo
     if (!best)
     {
         // cannot plan operative path outside map
-        LOG_ERROR(Script, "Out of map");
+        LOG_ERROR(Script, "Out of map: {} plans from field {} {} to {} {}", unit ? (const char*)unit->GetDebugName() : "?",
+                  xs, zs, xe, ze);
 
         // error recovery - try to use simple path
         goto SimplePath;

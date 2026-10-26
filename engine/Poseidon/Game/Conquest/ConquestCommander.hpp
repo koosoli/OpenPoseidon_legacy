@@ -36,6 +36,9 @@ struct GroupView
     int objective = -1;
     bool stalled = false; // the referee saw no progress toward the task for too long
     bool locked = false;  // ordered by a human commander: the planner counts it but never re-tasks it
+    bool crew = false;     // a tank's or gunship's crew: a full vehicle in a few men, never "worn out"
+    bool airborne = false; // a helicopter squad still in the air (a gunship, or air assault not yet set down):
+                           // it attacks or carries, never holds a place (owner, 2026-10-26)
 };
 
 struct SideView
