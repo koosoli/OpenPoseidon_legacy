@@ -1,0 +1,4 @@
+; Conquest on Malden. The player starts as a captive spectator; the referee moves him off the
+; battlefield and the setup screen picks the side.
+onMapSingleClick "conquestMapClick [_pos, _shift, _alt]"
+exit

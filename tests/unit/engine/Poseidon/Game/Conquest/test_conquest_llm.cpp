@@ -21,7 +21,7 @@ TEST_CASE("LLM commander: a well-formed answer becomes priorities, posture and a
     Llm::Advice advice;
     std::string error;
     const std::string text = R"({"priorities": [{"objective": "Figari", "weight": 3}, {"objective": "montignac", "weight": -1}],
-        "posture": "attack", "buy": "tank", "reason": "Figari first, it opens the road north."})";
+        "posture": "attack", "buy": "tank", "barrage": "figari", "reason": "Figari first, it opens the road north."})";
     REQUIRE(Llm::ParseAdvice(text, Towns, Squads, advice, error));
     REQUIRE(advice.priorities.size() == 2);
     CHECK(advice.priorities[0].first == "Figari");
@@ -29,6 +29,7 @@ TEST_CASE("LLM commander: a well-formed answer becomes priorities, posture and a
     CHECK(advice.priorities[1].first == "Montignac"); // matched without regard to case
     CHECK(advice.posture == "attack");
     CHECK(advice.buy == "Tank");
+    CHECK(advice.barrage == "Figari"); // the mortars, on a town the report named
     CHECK(advice.reason == "Figari first, it opens the road north.");
 }
 

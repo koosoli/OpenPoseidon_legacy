@@ -59,6 +59,8 @@ struct Snapshot
     std::array<int, MaxSides> bought{};
     int cap = 0;
     int winner = NoSide;
+    std::string winReason; // "holds 9 villages", "the war score"
+    int queuedPurchases = 0; // the player's side: purchases waiting for supplies or a quiet base
     std::vector<GroupSummary> groups;
     std::deque<std::string> log; // newest last
     float lastTickMs = 0.0f;
@@ -179,7 +181,48 @@ struct Options
     bool possession = true;        // take control of any friendly soldier
     bool hqRadio = true;           // the AI commander radios its orders while the player does not command
     std::array<bool, MaxSides> llmCommander{}; // the side's commander asks an LLM for its priorities (Hybrid)
+    bool resistance = false;       // a war with a third side: it takes part (off: its base is a neutral village)
+    std::array<float, MaxSides> startPool{500.0f, 500.0f, 500.0f}; // each side's supplies when the war begins
+    int victoryTowns = 0;          // a side holding this many villages (HQs not counted) wins; 0: off
 };
+
+// ---- who commands (multiplayer: one human commander per side, removable by a vote) ----
+
+struct CommandSeat
+{
+    bool multiplayer = false;
+    std::string holder;      // the player commanding the player's side, "" when the AI does
+    bool mine = false;       // ... it is this player
+    bool vote = false;       // a vote to remove the commander is running
+    float voteLeft = 0.0f;   // seconds
+    int yes = 0, no = 0, electorate = 0;
+    std::string voteTarget, voteCaller;
+    int myVote = 0;          // this player's vote: 1 yes, -1 no, 0 not yet
+};
+CommandSeat Seat();
+/// May the player take command of their side now? False, with why, while another player holds it.
+bool CanTakeCommand(std::string* why = nullptr);
+/// Ask the side to vote on removing its commander (multiplayer).
+bool CallVote(std::string* why = nullptr);
+/// This player's vote in the running vote.
+bool CastVote(bool yes);
+/// True once when the player lost command (voted out, or another player holds it): the view closes.
+bool TakeCommandLoss(std::string& notice);
+/// The soldier the side's human commander is (multiplayer: the seat holder's own; single player: the
+/// one the commander took over), for the discreet mark teammates see over him. nullptr when none.
+const Person* CommanderSoldier(int side);
+/// A human player (this one, or one across the network): the commander's orders only ask them.
+bool IsHumanPlayer(const Person* person);
+
+/// The side the setup screen may leave out (the Resistance), or NoSide.
+int OptionalSide();
+/// The most villages a victory condition can ask for: every objective but the HQs of the sides
+/// taking part (with `resistance` off, the Resistance's base is one more village).
+int VictoryTownsMax(bool resistance);
+/// After the war: the setup screen again, on a cleared island (single player).
+bool NewWar();
+/// After the war: the mission ends (back to the menu).
+void EndMission();
 
 /// The mission opened with CfgConquest setup = 1 and the player has not chosen yet.
 bool SetupPending();
@@ -205,6 +248,19 @@ struct BarrageInfo
 BarrageInfo Barrage();
 /// A mortar barrage on (x, y) for the player's side. False with a reason when it cannot be fired.
 bool OrderBarrage(float x, float y, std::string* reason = nullptr);
+
+/// Air support: the side's attack plane flies in and bombs one point, far more precisely than the
+/// mortars (CfgConquest airStrike*).
+struct AirStrikeInfo
+{
+    float cost = 0.0f;
+    int bombs = 0;
+    float spread = 0.0f;
+    float cooldownLeft = 0.0f;
+    bool inbound = false; // a plane is on its way
+};
+AirStrikeInfo AirStrike();
+bool OrderAirStrike(float x, float y, std::string* reason = nullptr);
 
 /// What HQ last ordered the player's own squad (the soldier's HUD shows it while it stands).
 struct PlayerOrder

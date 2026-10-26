@@ -1,15 +1,18 @@
-<#
+﻿<#
 .SYNOPSIS
-    Conquest feature check: setup screen, death carry-on, HQ orders, command posts, shroud, mortars,
+    Conquest feature check: setup screen, death carry-on, HQ orders, command posts, mortars, air support,
     the follow camera at ground level. Captures go to build/conquest-runs/features-<time>/.
 
 .DESCRIPTION
-    Two runs of the worktree's dist build (nothing is deployed) on the Everon war:
+    Five runs of the worktree's dist build (nothing is deployed), A-D on the Everon war, E on Malden:
       A  WEST, as a soldier, no commander view: HQ orders the player's squad; killing the player twice
          must carry them on into other soldiers, never end the mission.
-      B  EAST, in command, shroud: the command view with posts and symbols, a mortar barrage, the
+      B  EAST, in command (default fog of war): the command view with posts and symbols, a mortar barrage, the
          camera following a squad leader down to the ground; the possessed soldier's death returns
-         the player to command.
+         the player to command; air support shot down on its way in drops nothing.
+      C  EAST, in command: mortars, then air support on the same ground (one plane at a time).
+      D  GUER, the Resistance on, three villages to win, uneven supplies.
+      E  Malden: the war made from the island's town list; the shroud option, seen from above.
     Exit code 1 on a failed check. Must run under the game lock; it takes it itself when LOCK_OWNER is not set.
 #>
 param(
@@ -38,7 +41,7 @@ function Check($ok, $what) {
     if ($ok) { Write-Output "PASS $what" } else { Write-Output "FAIL $what"; $script:failures += $what }
 }
 
-function Invoke-Run($name, [scriptblock]$body) {
+function Invoke-Run($name, [scriptblock]$body, [string]$runMission = $mission) {
     $out = Join-Path $base $name
     New-Item -ItemType Directory -Force $out | Out-Null
     $env:POSEIDON_USER_DIR = Join-Path $out 'user'
@@ -49,7 +52,7 @@ function Invoke-Run($name, [scriptblock]$body) {
     $listener.Start(); $port = $listener.LocalEndpoint.Port; $listener.Stop()
     $log = Join-Path $out 'engine.log'
     $gameArgs = @('-C', ('"' + $GameDir + '"'), '--render=wgpu', '--window', '--no-dev', '--width', '1280', '--height', '720',
-        '--harness', "$port", '--test-mission', ('"' + $mission + '"'), '--log-file', ('"' + $log + '"'))
+        '--harness', "$port", '--test-mission', ('"' + $runMission + '"'), '--log-file', ('"' + $log + '"'))
     $p = Start-Process -FilePath $exe -ArgumentList $gameArgs -WorkingDirectory $Bin -PassThru -WindowStyle Hidden `
         -RedirectStandardOutput (Join-Path $out 'stdout.txt') -RedirectStandardError (Join-Path $out 'stderr.txt')
     $null = $p.Handle
@@ -109,18 +112,20 @@ Invoke-Run 'A-soldier' {
     }
     Start-Sleep -Seconds 6
     Check ((Eval 'conquestState') -notmatch 'inactive') 'A: the war still runs after two deaths'
+    Check ((LogCount 'stays out of this war') -ge 1) 'A: the Resistance is out by default'
+    Check ((Eval 'conquestState') -notmatch 'GUER') 'A: two sides only'
 }
 
 Invoke-Run 'B-commander' {
-    Check ((Eval 'conquestStart ["EAST", "commander", "shroud"]') -eq 'true') 'B: the war starts in command, shroud'
+    Check ((Eval 'conquestStart ["EAST", "commander", "contacts", "", [], false, 0, [500, 1500]]') -eq 'true') 'B: the war starts in command'
     Start-Sleep -Seconds 8
     Check ((LogCount 'commander view on') -ge 1) 'B: the command view opened at the start'
     $null = Eval 'conquestCamera [4772, 10700, 700, 55, 180]'
     Start-Sleep -Seconds 2
-    Shot 'command-shroud-airfield'
+    Shot 'command-airfield'
     $null = Eval 'conquestCamera [5000, 7500, 3000, 70, 180]'
     Start-Sleep -Seconds 2
-    Shot 'command-shroud-overview'
+    Shot 'command-overview'
     # The command post at the airfield, close.
     $null = Eval 'conquestCamera [4772, 10923, 90, 35, 200]'
     Start-Sleep -Seconds 2
@@ -134,27 +139,36 @@ Invoke-Run 'B-commander' {
     Start-Sleep -Seconds 4
     Shot 'barrage-2'
     Check ((Eval 'conquestBarrage [4700, 10450]') -match 'reloading') 'B: the mortars reload after a barrage'
-    # Follow an EAST squad leader, then all the way down to the ground.
-    Check ((Eval 'conquestCamera [4, 25, 30]') -eq 'true') 'B: following squad 4'
+    # Follow an EAST squad leader (each side starts with five squads: WEST 1-5, EAST 6-10), then all the way down.
+    Check ((Eval 'conquestCamera [7, 25, 30]') -eq 'true') 'B: following squad 7'
     Start-Sleep -Seconds 3
     Shot 'follow-25m'
-    $null = Eval 'conquestCamera [4, 3, 3]'
+    $null = Eval 'conquestCamera [7, 3, 3]'
     Start-Sleep -Seconds 3
     Shot 'follow-ground-level'
     # Into a soldier, killed: back in command.
-    $took = Eval 'conquestTakeControl 5'
-    Check ($took -eq 'true') "B: took control of squad 5 ($took)"
+    $took = Eval 'conquestTakeControl 7'
+    Check ($took -eq 'true') "B: took control of squad 7 ($took)"
     Start-Sleep -Seconds 3
     $null = Eval 'player setDammage 1'
     Start-Sleep -Seconds 5
     Shot 'back-in-command'
     Check ((LogCount 'the soldier you controlled was killed; back in command') -ge 1) 'B: the death returned the player to command'
     Check ((Eval 'conquestState') -notmatch 'inactive') 'B: the war still runs'
+    # Air support shot down on the way in: no bombs, the strike is lost.
+    $air = Eval 'conquestAirStrike [4700, 10450]'
+    Check ($air -eq 'true') "B: the air strike was called ($air)"
+    Start-Sleep -Seconds 6
+    $null = Eval '{_x setDammage 1} forEach ([4700, 10450] nearObjects ["Su25", 6000])'
+    Start-Sleep -Seconds 4
+    Check ((LogCount 'EAST air strike lost') -ge 1) 'B: the plane shot down, the strike is lost'
+    Start-Sleep -Seconds 40
+    Check ((LogCount 'EAST air strike: bombs away') -eq 0) 'B: a downed plane drops nothing'
 }
 
 Invoke-Run 'C-barrage' {
     # Mortars watched with the default fog of war, on open ground west of the airfield's runway.
-    Check ((Eval 'conquestStart ["EAST", "commander", "contacts"]') -eq 'true') 'C: the war starts in command'
+    Check ((Eval 'conquestStart ["EAST", "commander", "contacts", "", [], false, 0, [500, 1500]]') -eq 'true') 'C: the war starts in command'
     Start-Sleep -Seconds 6
     $null = Eval 'conquestCamera [4600, 10650, 260, 38, 90]'
     Check ((Eval 'conquestBarrage [4600, 10650]') -eq 'true') 'C: the barrage was ordered'
@@ -163,7 +177,42 @@ Invoke-Run 'C-barrage' {
         Start-Sleep -Milliseconds 1300
         Shot "rounds-$t"
     }
+    # Air support on the same open ground: the plane comes in and drops on the point.
+    $air = Eval 'conquestAirStrike [4600, 10650]'
+    Check ($air -eq 'true') "C: the air strike was called ($air)"
+    Check ((Eval 'conquestAirStrike [4600, 10650]') -match 'on its way|rearming') 'C: one plane at a time'
+    $deadline = [DateTime]::UtcNow.AddSeconds(100)
+    while ((LogCount 'EAST air strike: bombs away') -lt 1 -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Seconds 2 }
+    Check ((LogCount 'EAST air strike: bombs away') -ge 1) 'C: the plane dropped its bombs'
+    foreach ($t in 1..4) {
+        Start-Sleep -Milliseconds 700
+        Shot "bombs-$t"
+    }
 }
+
+Invoke-Run 'D-resistance' {
+    # Three sides, three villages to win, uneven supplies: [side, start, fog, view, llm, resistance, villages, supplies]
+    Check ((Eval 'conquestStart ["GUER", "soldier", "contacts", "", [], true, 3, [900, 400, 650]]') -eq 'true') 'D: the war starts with the Resistance'
+    Start-Sleep -Seconds 12
+    $state = Eval 'conquestState'
+    Check ($state -match 'GUER') "D: the Resistance takes part"
+    Check ((LogCount 'stays out of this war') -eq 0) 'D: nobody was left out'
+    Check ((LogCount 'GUER bought|GUER group') -ge 1) 'D: the Resistance commander acts'
+    Shot 'resistance-soldier'
+}
+
+Invoke-Run 'E-malden' {
+    # An island without a hand-written war: the objectives come from its town list.
+    Check ((LogCount 'objectives from the island''s towns') -eq 1) 'E: Malden''s war was made from its towns'
+    Check ((LogCount 'the player''s body waits at') -ge 1) 'E: the spectator body was moved off the battlefield'
+    # The shroud (an option, never the default) is a top-down overlay: checked from high above only.
+    Check ((Eval 'conquestStart ["WEST", "commander", "shroud"]') -eq 'true') 'E: the war starts on Malden (shroud option)'
+    Start-Sleep -Seconds 10
+    Check ((Eval 'conquestState') -match 'WEST') 'E: the war runs'
+    $null = Eval 'conquestCamera [6400, 6400, 4000, 75, 0]'
+    Start-Sleep -Seconds 3
+    Shot 'malden-shroud-from-above'
+} (Join-Path $root 'content/default-packs/conquest/missions/conquest-malden.Abel')
 
 Write-Output "Conquest feature test: $base"
 if ($script:failures.Count) { Write-Output "$($script:failures.Count) check(s) failed"; exit 1 }

@@ -246,6 +246,150 @@ int StepEconomy(War& war, float dt, const Tuning& tuning)
     return alive == 1 ? last : NoSide;
 }
 
+int TownVictor(const War& war, int towns)
+{
+    if (towns <= 0)
+        return NoSide;
+    int best = NoSide, most = 0;
+    for (int side = 0; side < war.sideCount; side++)
+    {
+        const int held = war.defeated[side] ? 0 : OwnedCount(war, side, false);
+        if (held >= towns && held > most)
+        {
+            best = side;
+            most = held;
+        }
+    }
+    return best;
+}
+
+int TownCount(const War& war)
+{
+    int n = 0;
+    for (const ObjectiveDef& d : war.defs)
+        if (d.kind != ObjectiveKind::HQ)
+            n++;
+    return n;
+}
+
+void DropLastSide(War& war, const Tuning& tuning, float startPool)
+{
+    if (war.sideCount <= 2)
+        return;
+    const int gone = --war.sideCount;
+    for (ObjectiveDef& d : war.defs)
+        if (d.initialOwner == gone)
+        {
+            d.initialOwner = NoSide;
+            if (d.kind == ObjectiveKind::HQ)
+                d.kind = ObjectiveKind::Town;
+        }
+    StartWar(war, tuning, startPool);
+}
+
+std::vector<ObjectiveDef> AutoObjectives(const std::vector<Place>& input, int sides, float link)
+{
+    // The larger places first, so a hamlet beside a town folds into the town.
+    std::vector<Place> places = input;
+    std::stable_sort(places.begin(), places.end(), [](const Place& a, const Place& b) { return a.rank > b.rank; });
+    std::vector<ObjectiveDef> defs;
+    const auto dist = [](float ax, float ay, float bx, float by) { return std::hypot(ax - bx, ay - by); };
+    for (const Place& p : places)
+    {
+        if (std::any_of(defs.begin(), defs.end(),
+                        [&](const ObjectiveDef& d) { return d.name == p.name || dist(d.x, d.y, p.x, p.y) < 200.0f; }))
+            continue;
+        ObjectiveDef d;
+        d.name = p.name;
+        d.x = p.x;
+        d.y = p.y;
+        d.radius = p.rank >= 2 ? 150.0f : p.rank == 1 ? 130.0f : 100.0f;
+        d.value = p.rank >= 2 ? 10.0f : p.rank == 1 ? 7.0f : 5.0f;
+        defs.push_back(d);
+    }
+    const int n = static_cast<int>(defs.size());
+    if (n < 2)
+        return defs;
+    // The HQs: the two places farthest apart, then the one farthest from both.
+    int a = 0, b = 1;
+    for (int i = 0; i < n; i++)
+        for (int j = i + 1; j < n; j++)
+            if (dist(defs[i].x, defs[i].y, defs[j].x, defs[j].y) > dist(defs[a].x, defs[a].y, defs[b].x, defs[b].y))
+            {
+                a = i;
+                b = j;
+            }
+    std::vector<int> hq{a, b};
+    if (sides >= 3 && n >= 3)
+    {
+        int c = -1;
+        float best = -1.0f;
+        for (int k = 0; k < n; k++)
+        {
+            if (k == a || k == b)
+                continue;
+            const float m = std::min(dist(defs[k].x, defs[k].y, defs[a].x, defs[a].y), dist(defs[k].x, defs[k].y, defs[b].x, defs[b].y));
+            if (m > best)
+            {
+                best = m;
+                c = k;
+            }
+        }
+        hq.push_back(c);
+    }
+    for (size_t s = 0; s < hq.size(); s++)
+    {
+        ObjectiveDef& d = defs[hq[s]];
+        d.kind = ObjectiveKind::HQ;
+        d.initialOwner = static_cast<int>(s);
+        d.value = 10.0f;
+        d.radius = std::max(d.radius, 150.0f);
+    }
+    const auto join = [&](int i, int j)
+    {
+        if (i == j)
+            return;
+        if (std::find(defs[i].neighbours.begin(), defs[i].neighbours.end(), j) == defs[i].neighbours.end())
+            defs[i].neighbours.push_back(j);
+        if (std::find(defs[j].neighbours.begin(), defs[j].neighbours.end(), i) == defs[j].neighbours.end())
+            defs[j].neighbours.push_back(i);
+    };
+    // Each place to its nearest neighbours ...
+    for (int i = 0; i < n; i++)
+    {
+        std::vector<int> order;
+        for (int j = 0; j < n; j++)
+            if (j != i)
+                order.push_back(j);
+        std::sort(order.begin(), order.end(), [&](int p, int q)
+                  { return dist(defs[i].x, defs[i].y, defs[p].x, defs[p].y) < dist(defs[i].x, defs[i].y, defs[q].x, defs[q].y); });
+        for (size_t k = 0; k < order.size() && k < 3; k++)
+            if (dist(defs[i].x, defs[i].y, defs[order[k]].x, defs[order[k]].y) <= link)
+                join(i, order[k]);
+    }
+    // ... and the shortest links that keep every place reachable (a minimum spanning tree), so no
+    // island in the graph is left out of the war however far it lies.
+    std::vector<bool> in(n, false);
+    in[0] = true;
+    for (int added = 1; added < n; added++)
+    {
+        int bi = -1, bj = -1;
+        float best = 1.0e30f;
+        for (int i = 0; i < n; i++)
+            if (in[i])
+                for (int j = 0; j < n; j++)
+                    if (!in[j] && dist(defs[i].x, defs[i].y, defs[j].x, defs[j].y) < best)
+                    {
+                        best = dist(defs[i].x, defs[i].y, defs[j].x, defs[j].y);
+                        bi = i;
+                        bj = j;
+                    }
+        in[bj] = true;
+        join(bi, bj);
+    }
+    return defs;
+}
+
 void RecordLoss(War& war, int side, const Tuning& tuning)
 {
     if (side >= 0 && side < war.sideCount)

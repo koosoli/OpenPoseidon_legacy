@@ -180,6 +180,78 @@ TEST_CASE("conquest: spawn eligibility", "[conquest]")
     CHECK(why == "just captured");
 }
 
+TEST_CASE("conquest: the villages-to-win condition", "[conquest]")
+{
+    War war = LineWar();
+    CHECK(TownCount(war) == 3);
+    CHECK(TownVictor(war, 0) == NoSide); // off
+    war.states[1].owner = 0;
+    CHECK(TownVictor(war, 2) == NoSide);
+    war.states[2].owner = 0;
+    CHECK(TownVictor(war, 2) == 0);
+    war.states[3].owner = 1;
+    CHECK(TownVictor(war, 3) == NoSide); // all three: nobody yet
+    war.states[3].owner = 0;
+    CHECK(TownVictor(war, 3) == 0);
+}
+
+TEST_CASE("conquest: a third side left out becomes neutral ground", "[conquest]")
+{
+    War war = LineWar();
+    war.sideCount = 3;
+    war.defs[2].kind = ObjectiveKind::HQ; // B is the third side's base
+    war.defs[2].initialOwner = 2;
+    StartWar(war, Tuning(), 300.0f);
+    CHECK(war.states[2].owner == 2);
+    CHECK_FALSE(war.defeated[2]);
+    DropLastSide(war, Tuning(), 300.0f);
+    CHECK(war.sideCount == 2);
+    CHECK(war.states[2].owner == NoSide);
+    CHECK(war.defs[2].kind == ObjectiveKind::Town);
+    CHECK(war.defeated[2]);
+    CHECK(war.pool[2] == 0.0f);
+    CHECK(TownCount(war) == 3);
+    DropLastSide(war, Tuning(), 300.0f); // never below two
+    CHECK(war.sideCount == 2);
+}
+
+TEST_CASE("conquest: a war generated from an island's town list", "[conquest]")
+{
+    // A row of towns 1 km apart, a hamlet beside the capital, and a far islet.
+    std::vector<Place> places{{"West End", 0, 0, 0},      {"Mid", 1000, 0, 1},    {"Capital", 2000, 0, 2},
+                              {"Hamlet", 2100, 50, 0},    {"East", 3000, 0, 0},   {"Far East", 4000, 0, 0},
+                              {"North Cape", 1000, 6000, 0}, {"Islet", 9000, 9000, 0}};
+    const std::vector<ObjectiveDef> defs = AutoObjectives(places, 3);
+    REQUIRE(defs.size() == 7); // the hamlet merged into the capital
+    int hqs = 0;
+    std::vector<std::string> hqNames(3);
+    for (const ObjectiveDef& d : defs)
+        if (d.kind == ObjectiveKind::HQ)
+        {
+            hqs++;
+            hqNames[d.initialOwner] = d.name;
+        }
+    CHECK(hqs == 3);
+    CHECK(((hqNames[0] == "West End" && hqNames[1] == "Islet") || (hqNames[1] == "West End" && hqNames[0] == "Islet")));
+    CHECK(hqNames[2] == "North Cape");
+    // Everything reachable from the first place.
+    std::vector<bool> seen(defs.size(), false);
+    std::vector<int> stack{0};
+    seen[0] = true;
+    while (!stack.empty())
+    {
+        const int i = stack.back();
+        stack.pop_back();
+        for (int n : defs[i].neighbours)
+            if (!seen[n])
+            {
+                seen[n] = true;
+                stack.push_back(n);
+            }
+    }
+    CHECK(std::all_of(seen.begin(), seen.end(), [](bool b) { return b; }));
+}
+
 TEST_CASE("conquest: income, score drain and defeat", "[conquest]")
 {
     War war = LineWar();
