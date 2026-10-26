@@ -509,3 +509,16 @@ At the owner's request (2026-10-25/26), ahead of the slice order:
 - **Capture speed rises with numbers:** `90 s / clamp(strength / 4, 0.5, 6)`.
 - New script commands: `conquestCommanderView`, `conquestBuy [base, type]`, `conquestTakeControl id`.
 - Verified through the harness (captures in `build/conquest-runs/`, not committed); not yet played by hand.
+- **Soaks with vehicles, 2026-10-26** (4× time, `scripts/conquest_soak_report.py`):
+
+  | Seed | Game min | Changes of hands per hour | Stalls | Winner |
+  |---|---:|---:|---:|---|
+  | 11 | 49 | 13.5 | 8 | EAST |
+  | 22 | 54 | 7.8 | 24 | EAST |
+  | 33 | 51 | 12.9 | 1 | WEST |
+  | 44 | 70 | 14.5 | 0 | WEST |
+
+  Seeds 33 and 44 ran after two fixes. First, a squad in contact with known enemies within 400 m counts as busy,
+  not stalled: before, squads fighting outside a held town were re-tasked into the same fight again and again.
+  Second, the AI no longer buys the 4-man recon jeep (`ai = 0`); before, 24 of 32 AI purchases were jeeps. Every war
+  ended, and the live cap held. Balance is not established yet: over all five runs, WEST won 3 and EAST 2.

@@ -21,7 +21,7 @@ def main() -> int:
 
     captured = [e for e in events if " captured " in e]
     neutralised = [e for e in events if " neutralised " in e]
-    bought = [e for e in events if " bought a squad " in e]
+    bought = [e for e in events if " bought a " in e]
     refused = [e for e in events if " refused: " in e]
     stalled = [e for e in events if " stalled " in e]
     wins = [e for e in events if " wins the war" in e]

@@ -38,7 +38,8 @@ class CfgConquest
         {
             name = "Recon jeep";
             cost = 70;
-            role = "motorised";
+            role = "recon";
+            ai = 0; // four men in a jeep: the player's scouting tool, poor value as an AI reinforcement
             WEST[] = {"SoldierWB", "SoldierWMG", "SoldierWLAW", "SoldierWB"};
             EAST[] = {"SoldierEB", "SoldierEMG", "SoldierELAW", "SoldierEB"};
             WESTvehicles[] = {"Jeep"};

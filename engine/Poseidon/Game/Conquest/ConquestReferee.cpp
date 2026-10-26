@@ -777,6 +777,23 @@ void TrackUnits(Referee& r, float now)
     }
 }
 
+// Does `side` know of an enemy, seen in the last minute, within 400 m of `pos`?
+bool InContact(const Referee& r, int side, const Vector3& pos)
+{
+    AICenter* center = GWorld->GetCenter(r.config.engineSide[side]);
+    if (!center)
+        return false;
+    for (int t = 0; t < center->NTargets(); t++)
+    {
+        const AITargetInfo& info = center->GetTarget(t);
+        if (info._destroyed || info._vanished || !center->IsEnemy(info._side) || Glob.time - info._time > 60.0f)
+            continue;
+        if (std::hypot(info._pos.X() - pos.X(), info._pos.Z() - pos.Z()) < 400.0f)
+            return true;
+    }
+    return false;
+}
+
 void TrackGroups(Referee& r, float now)
 {
     for (size_t i = 0; i < r.groups.size();)
@@ -821,9 +838,11 @@ void TrackGroups(Referee& r, float now)
         {
             const ObjectiveDef& d = r.war.defs[rec.objective];
             const float dist = Dist(grp->Leader()->Position(), d);
-            if (dist < rec.bestDistance - 25.0f)
+            // A squad trading fire on the way is busy, not stuck: soaks showed squads "stalled"
+            // in front of a held town, re-tasked, and sent straight back into the same fight.
+            if (dist < rec.bestDistance - 25.0f || InContact(r, rec.side, grp->Leader()->Position()))
             {
-                rec.bestDistance = dist;
+                rec.bestDistance = std::min(rec.bestDistance, dist);
                 rec.bestAt = now;
             }
             if (rec.task == TaskKind::Attack && dist > d.radius && now - rec.bestAt > StallSeconds && !rec.stalled)
