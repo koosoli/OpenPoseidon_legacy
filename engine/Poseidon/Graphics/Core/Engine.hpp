@@ -2569,6 +2569,8 @@ class Engine : public IGraphicsEngine
             float foamIntensity = 1.0f;    // foam brightness
             bool ssr = true;               // screen-space reflections of the scene
             bool sunGlitter = true;        // SEA-GLINTS: the sun's glitter on the sea (owner sign-off 2026-10-26)
+            bool seaHydro = false;         // SEA-HYDRO: short waves bunched on crests (needs WGR_SEA_HYDRO=1)
+            bool seaSmear = false;         // SEA-SMEAR: froth trailing downwind (needs WGR_SEA_SMEAR=1)
             float reflectionStrength = 1.0f;
             float cascadeScale = 1.0f;     // x 733 / 157 / 33.3 / 7.1 m cascade tiles
             float roughness = 0.035f;      // base GGX roughness

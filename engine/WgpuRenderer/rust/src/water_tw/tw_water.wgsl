@@ -539,7 +539,8 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, waveH: f32
     let dL1 = textureSample(oceanDerivatives, smpAniso4Repeat, lagXZ / ocean.sizes[1].x, 1) * waterSurfaceCascadeAttenuation(1, depth);
     let sLong = (dL0.xy + dL1.xy) * tw.surface.x;
     let faceM = smoothstep(0.0, 1.0, -dot(sLong, tw.wind.xy) / 0.08);
-    let hydro = mix(0.8, 1.25, sat(0.6 * crestM + 0.4 * faceM));
+    // (the Water tab's "TW crest bunching", tw.look.y, scales it in)
+    let hydro = mix(1.0, mix(0.8, 1.25, sat(0.6 * crestM + 0.4 * faceM)), tw.look.y);
     let rough = det.rough * hydro;
     d = dL0 + dL1 * mix(1.0, rough, 0.4);
     for (var c = 2; c < CASCADES; c++) {
@@ -663,7 +664,8 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, waveH: f32
     // instead of reading as painted on the crest. The foam field of the two whitecap cascades (the
     // vertex foam's own source, twDisplace), near the eye only (beyond 1 m pixels the trail is under a
     // pixel): six taps there.
-    let smearNear = 1.0 - smoothstep(0.5, 1.0, footprint);
+    // (the Water tab's "TW froth smear", tw.look.z)
+    let smearNear = (1.0 - smoothstep(0.5, 1.0, footprint)) * tw.look.z;
     if (smearNear > 0.0) {
         var trail = 0.0;
         let offs = array<vec2<f32>, 3>(vec2<f32>(1.5, 0.8), vec2<f32>(3.0, 0.55), vec2<f32>(5.0, 0.3));
