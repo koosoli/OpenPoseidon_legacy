@@ -17,6 +17,8 @@ constexpr int MaxSupplyTrucks = 3;
 
 bool IsSupply(const Referee& r, const GroupRecord& rec)
 {
+    if (rec.truckless)
+        return false; // its truck is gone: the crew fights on foot
     return rec.supplyDuty ||
            (rec.type >= 0 && rec.type < static_cast<int>(r.config.squads.size()) && r.config.squads[rec.type].role == "supply");
 }
@@ -94,6 +96,48 @@ int NeediestBase(const Referee& r, int side, int hq, const GroupRecord* self)
     return best;
 }
 
+// A supply squad without its truck (destroyed, or stuck for good and left behind): the load is lost, and the
+// crew joins the fight on foot rather than standing at the HQ for the rest of the war. The commander buys
+// another truck (KeepSupplyTrucks counts only squads that still have one).
+void LoseTruck(Referee& r, GroupRecord& rec, float now, bool abandoned)
+{
+    AIGroup* grp = rec.group;
+    if (abandoned && grp)
+    {
+        std::vector<Transport*> trucks;
+        for (int v = 0; v < grp->NVehicles(); v++)
+            if (Transport* t = grp->GetVehicle(v))
+                trucks.push_back(t);
+        for (int id = 1; id <= MAX_UNITS_PER_GROUP; id++)
+            if (AIUnit* unit = grp->UnitWithID(id); unit && !unit->IsFreeSoldier())
+                unit->OrderGetIn(false);
+        for (Transport* t : trucks)
+            grp->UnassignVehicle(t); // leaveVehicle: see TrackGroups
+        grp->GetInVehicles();
+    }
+    const std::string load = rec.supplyLoad > 0.0f
+                                 ? " with " + std::to_string(static_cast<int>(rec.supplyLoad)) + " supplies"
+                                 : std::string();
+    WarLog(Name(rec.side) + " supply truck " + Callsign(rec.id) + (abandoned ? " stuck for good, left behind" : " lost") +
+           load + ": the crew fights on foot");
+    if (!load.empty())
+        Radio(r, rec.side, Callsign(rec.id) + (abandoned ? ": the truck is stuck, we leave it" : " is down") +
+                               ": the supplies are lost.");
+    rec.supplyLoad = 0.0f;
+    rec.supplyState = 0;
+    rec.supplyTarget = -1;
+    rec.supplyPin = -1;
+    rec.supplyDuty = false;
+    rec.truckless = true;
+    rec.task = TaskKind::None;
+    rec.objective = -1;
+    rec.lockedUntil = -1.0e9f; // SupplyMove held it for the supply line; the planner has it now
+    rec.holding = false;
+    rec.onFoot = true;
+    r.replan[rec.side] = true;
+    (void)now;
+}
+
 void SupplyMove(GroupRecord& rec, const ObjectiveDef& d, float now)
 {
     rec.task = TaskKind::Move;
@@ -120,13 +164,7 @@ void StepSupply(Referee& r, float dt, float now)
                 truck = t;
         if (!truck)
         {
-            if (rec.supplyLoad > 0.0f)
-            {
-                WarLog(Name(rec.side) + " supply truck " + Callsign(rec.id) + " lost with " +
-                       std::to_string(static_cast<int>(rec.supplyLoad)) + " supplies");
-                Radio(r, rec.side, Callsign(rec.id) + " is down: the supplies are lost.");
-            }
-            rec.supplyLoad = 0.0f;
+            LoseTruck(r, rec, now, false);
             continue;
         }
         const int hq = HqOf(r, rec.side);
@@ -214,4 +252,42 @@ bool KeepSupplyTrucks(Referee& r, int side, float now)
         return false;
     WarLog(Name(side) + " bought a supply truck at " + r.war.defs[hq].name + " (" + std::to_string(bases) + " bases to supply)");
     return true;
+}
+
+// The magazines an arsenal weapon fires: the first of each muzzle's magazines[] (an M16 with its grenade
+// launcher brings both kinds; a launcher's own rockets, "this", carry its name). Empty for a weapon without
+// ammunition (binoculars).
+std::vector<std::string> WeaponMagazines(const std::string& weapon)
+{
+    std::vector<std::string> out;
+    const ParamEntry* w = (Pars >> "CfgWeapons").FindEntry(weapon.c_str());
+    if (!w || !w->IsClass())
+        return out;
+    const auto first = [&](const ParamEntry& e)
+    {
+        const ParamEntry* list = e.FindEntry("magazines");
+        if (!list || !list->IsArray() || list->GetSize() == 0)
+            return;
+        const RStringB name = (*list)[0];
+        // "this": the magazine named after the weapon (or muzzle) itself, as Weapons.cpp reads it.
+        const std::string magazine = _stricmp(static_cast<const char*>(name), "this") == 0
+                                         ? std::string(static_cast<const char*>(e.GetName()))
+                                         : std::string(static_cast<const char*>(name));
+        if (!magazine.empty() && std::find(out.begin(), out.end(), magazine) == out.end())
+            out.push_back(magazine);
+    };
+    const ParamEntry* muzzles = w->FindEntry("muzzles");
+    if (!muzzles || !muzzles->IsArray() || muzzles->GetSize() == 0)
+    {
+        first(*w);
+        return out;
+    }
+    for (int i = 0; i < muzzles->GetSize(); i++)
+    {
+        const RStringB name = (*muzzles)[i];
+        const ParamEntry* m = _stricmp(static_cast<const char*>(name), "this") == 0 ? w : w->FindEntry(name);
+        if (m && m->IsClass())
+            first(*m);
+    }
+    return out;
 }

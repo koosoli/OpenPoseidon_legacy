@@ -1623,9 +1623,28 @@ static AISubgroupFSM::StateInfo joinStates[] = {
 
 // Command GetIn FSM
 
+// The vehicle a get-in command heads for is no longer the unit's: the group gave it up (leaveVehicle), the
+// vehicle cannot move any more and was unassigned (AIGroup::AssignVehicles), or the unit was moved to another
+// seat. Every check of the get-in FSM ends such a command (CheckGetInDone), but a state's entry runs before
+// its check and used to trip an AI_ERROR here and send the unit toward a vehicle that was not its own. Now the
+// unit stays where it is, and the next check ends the command.
+static bool GetInStillAssigned(AIUnit* unit, Transport* veh)
+{
+    if (veh == unit->VehicleAssigned())
+    {
+        return true;
+    }
+    LOG_DEBUG(AI, "GetIn: {} heads for {}, no longer its vehicle; the command ends", (const char*)unit->GetDebugName(),
+              veh ? (const char*)veh->GetDebugName() : "nothing");
+    return false;
+}
+
 static Vector3 GetGetInPoint(AIUnit* unit, Transport* veh)
 {
-    AI_ERROR(veh == unit->VehicleAssigned());
+    if (!GetInStillAssigned(unit, veh))
+    {
+        return unit->Position();
+    }
     Vector3 pos = veh->GetUnitGetInPos(unit);
     pos[1] = GLandscape->RoadSurfaceYAboveWater(pos[0], pos[2]);
     return pos;
@@ -1635,7 +1654,10 @@ static Vector3 GetGetInPointFar(AIUnit* unit, Transport* veh)
 {
     Vector3 res;
 
-    AI_ERROR(veh == unit->VehicleAssigned());
+    if (!GetInStillAssigned(unit, veh))
+    {
+        return unit->Position();
+    }
 
     if (veh->IsStopped())
     {

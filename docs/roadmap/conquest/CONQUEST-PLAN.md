@@ -834,3 +834,39 @@ another soldier rather than a paid redeploy screen); artillery flight time and c
 built and played, plus the 5-minute start delay). Not done: virtual far groups (not needed at a cap of 80);
 imported worlds (each needs a mission and testing on that world's data); a radio-menu (0-8) entry for taking
 command (Ctrl+M does it).
+
+### Status 2026-10-26 (late): stuck squads, the arsenal's ammunition, shorter tests
+
+Stuck squads, from four soaks (80 game minutes each, both sides on the AI):
+
+- **A truck squad that got out went straight back in.** The engine's own move and attack logic re-boards a
+  squad on any move over 200-300 m, so a squad that dismounted from a stuck truck was in the same truck a
+  minute later (one squad: 20 times in a war). A stuck vehicle now first backs off 30-75 m to one side and
+  tries again (`Detour`, `ConquestRefereeMove.inc`); a truck squad still stuck after that leaves its trucks for
+  good (`AIGroup::UnassignVehicle`, the script command `leaveVehicle`) and walks.
+- **Supply trucks had no stuck handling at all.** They back off too; one that five detours do not free is left
+  behind, its load lost. A supply crew without a truck (destroyed or left) fights on foot instead of standing
+  at the HQ for the rest of the war, and the commander buys a new truck.
+- **The same order every plan.** A worn-down squad in a rear town was freed and given the same "regrouping"
+  task back on every plan (39-145 times a war); each re-order planned its path anew and reset its progress, so
+  it was never seen to be stuck. The referee now ignores an assignment a squad already has (unless it stalled).
+- **The engine's get-in check** (`AISubgroupFSM` "veh == unit->VehicleAssigned()"): a get-in command whose
+  vehicle is no longer the unit's (given up, unassigned as unable to move, or a seat change) tripped the check
+  on entering a state and sent the soldier toward a vehicle that was not his. The unit now stays put and the
+  next check ends the command.
+
+| Soak (80 game min) | captures | truck squads sent on foot | stalls | engine errors |
+|---|---|---|---|---|
+| before (3b2e1be40) | 61 | 31 (one squad 20x) | 11 | 0 |
+| after | 86 | 1 | 4 | 0 |
+
+**The arsenal's ammunition**: the side's ammo box holds only the common magazines, so the sniper rifle (and the
+Carl Gustav) came with nothing to fire. Every weapon the arsenal offers now brings five magazines a weapon,
+read from its config (each muzzle; "this" is the weapon's own name).
+
+**Shorter tests**: the soak runs to `-GameMinutes` (80) at `setAccTime 8` with the frame rate uncapped (the
+old 60 fps cap held it to 4x: the engine runs at most 8 fixed steps a frame) -- 12 real minutes instead of 20.
+The feature test runs its waits for planes and the helicopter at 4x: 4 minutes instead of 6.
+
+Open: an occasional "Out of map" (OperMap path planning falling back to a straight path, 0-3 a war) and the
+pre-existing `[ai]` unit test "EntityEvent enum names" failure; neither is from Conquest.
