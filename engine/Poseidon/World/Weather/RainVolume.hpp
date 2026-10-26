@@ -82,8 +82,8 @@ struct RainParams
 	/// ground and nearly gone against the sky, catching the light toward the sun -- drawn as thin
 	/// tapered streaks whose sub-pixel width becomes faintness, not dashes, and ring splashes laid
 	/// flat on the ground. Drawing only: occlusion, puddles and wind are unchanged.
-	/// POSEIDON_RAIN_LOOK=1 forces it on; the Weather tab switches it.
-	bool modernLook = false;
+	/// On since the owner's sign-off (2026-10-26); POSEIDON_RAIN_LOOK=0 or the Weather tab turns it off.
+	bool modernLook = true; ///< signed off by the owner 2026-10-26
 	/// RAIN-LOOK: a streak's opacity, its length (x streakLength) and the drop count (x targetDrops).
 	/// Fine, faint and many: the first pass (0.34 / 1.0 / 2.5x) read as white lines (owner).
 	float modernAlpha = 0.10f;

@@ -304,9 +304,9 @@ Vector3 RainRelaxVelocity(Vector3Par current, Vector3Par target, float responseP
 
 RainSystem::RainSystem()
 {
-    if (const char* look = std::getenv("POSEIDON_RAIN_LOOK"); look != nullptr && look[0] == '1')
+    if (const char* look = std::getenv("POSEIDON_RAIN_LOOK"); look != nullptr)
     {
-        _params.modernLook = true;
+        _params.modernLook = look[0] != '0';
     }
     // alpha, length scale, count scale of the new look (the Weather tab's sliders), for captures
     if (const char* tune = std::getenv("POSEIDON_RAIN_LOOK_TUNE"))
@@ -958,7 +958,8 @@ static float RainStreakAlpha(float u, float v)
 static float RainRingAlpha(float x, float y)
 {
     const float r = std::sqrt(x * x + y * y);
-    return r < 1.0f ? std::exp(-Square((r - 0.78f) / 0.09f)) : 0.0f;
+    // a soft, thin ring with a faint inner one: a ripple, not a drawn circle
+    return r < 1.0f ? std::exp(-Square((r - 0.8f) / 0.06f)) + 0.35f * std::exp(-Square((r - 0.5f) / 0.05f)) : 0.0f;
 }
 
 // a streak texture laid along x (the long axis of DrawDecalRotated's quad runs along u)
@@ -1105,7 +1106,10 @@ void RainSystem::DrawModern()
     for (const Splash& splash : _splashes)
     {
         const float t = std::clamp(splash.age / std::max(_params.splashLifetime, 1e-3f), 0.0f, 1.0f);
-        const float radius = 0.03f + 0.6f * _params.splashSize * std::sqrt(t);
+        // each ripple its own size (a hash of where it fell): uniform rings read as stamped
+        const float h = std::sin(splash.position.X() * 12.9898f + splash.position.Z() * 78.233f) * 43758.5453f;
+        const float sizeVar = 0.55f + 0.45f * (h - std::floor(h));
+        const float radius = 0.02f + 0.38f * _params.splashSize * sizeVar * std::sqrt(t);
         const Vector3 view = toView * splash.position;
         if (view.Z() < nearest)
             continue;
@@ -1123,10 +1127,12 @@ void RainSystem::DrawModern()
             continue;
         const float fog = GScene->Fog8(toSplash.SquareSize()) * (1.0f / 255.0f);
         Color colour = white;
-        colour.SetA(0.55f * _params.opacity * std::pow(1.0f - t, 1.5f) * (1.0f - fog));
+        // faint: a ripple shows the sky in a ring of slightly tilted water, it is not white (owner,
+        // 2026-10-26: 'water ripples look too bright and a bit cartoony')
+        colour.SetA(0.16f * _params.opacity * std::pow(1.0f - t, 2.0f) * (1.0f - fog));
         // the quad's long axis horizontal on screen: the ring's width across, its foreshortened depth up
         GEngine->DrawDecalRotated(posp, invNearPos, halfH, halfW, PackedColor(colour), ringMip, kRainSpecials, 1.0f,
-                                  0.0f, radiance * 1.2f);
+                                  0.0f, radiance * 0.8f);
     }
 }
 
