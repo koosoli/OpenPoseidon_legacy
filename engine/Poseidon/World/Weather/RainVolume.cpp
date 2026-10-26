@@ -31,25 +31,6 @@ namespace Poseidon
 {
 RainSystem GRain;
 
-// RAIN-LOOK tuning while the look is decided: POSEIDON_RAIN_LOOK_TUNE=alpha,length scale,count scale
-struct RainLookTune
-{
-    float alpha = 0.16f;
-    float length = 1.0f;
-    float count = 2.5f;
-};
-static const RainLookTune& GetRainLookTune()
-{
-    static const RainLookTune tune = [] {
-        RainLookTune t;
-        if (const char* v = std::getenv("POSEIDON_RAIN_LOOK_TUNE"))
-        {
-            std::sscanf(v, "%f,%f,%f", &t.alpha, &t.length, &t.count);
-        }
-        return t;
-    }();
-    return tune;
-}
 
 RainSystem GSnowFlakes;
 
@@ -326,6 +307,11 @@ RainSystem::RainSystem()
     if (const char* look = std::getenv("POSEIDON_RAIN_LOOK"); look != nullptr && look[0] == '1')
     {
         _params.modernLook = true;
+    }
+    // alpha, length scale, count scale of the new look (the Weather tab's sliders), for captures
+    if (const char* tune = std::getenv("POSEIDON_RAIN_LOOK_TUNE"))
+    {
+        std::sscanf(tune, "%f,%f,%f", &_params.modernAlpha, &_params.modernLength, &_params.modernCount);
     }
     if (RainTestHook())
     {
@@ -627,7 +613,7 @@ void RainSystem::Spawn(float deltaT)
     // the target in the panel cannot build a spawn debt that fires as a burst.
     const float meanLifetime = std::max(_params.spawnHeight / std::max(_params.fallSpeed, 0.5f), 0.1f);
     // RAIN-LOOK: thin, mostly see-through streaks need more of them to read as heavy rain
-    const float lookScale = (!_params.snowflakes && _params.modernLook) ? GetRainLookTune().count : 1.0f;
+    const float lookScale = (!_params.snowflakes && _params.modernLook) ? _params.modernCount : 1.0f;
     const int targetDrops = static_cast<int>(_params.targetDrops * lookScale);
     const int maxDrops = static_cast<int>(_params.maxDrops * lookScale);
     const float rate = static_cast<float>(targetDrops) * EffectiveDensity() / meanLifetime;
@@ -1041,7 +1027,7 @@ void RainSystem::DrawModern()
     // a streak is a few millimetres of water smeared by its fall: mostly see-through. The first pass
     // (0.34, sky x 0.28) drew bright white lines (owner, 2026-10-26: "looks like white lines"); rain
     // reads as a faint grey veil, so each streak is barely there and the count does the work.
-    const float streakAlpha = GetRainLookTune().alpha * _params.opacity;
+    const float streakAlpha = _params.modernAlpha * _params.opacity;
     const float widthM = 0.012f;
 
     for (const Drop& drop : _drops)
@@ -1051,7 +1037,7 @@ void RainSystem::DrawModern()
         const Vector3 velocity(drop.velocityX, -drop.speed, drop.velocityZ);
         const float speed = std::max(velocity.Size(), 0.001f);
         const float horizontalSpeed = std::sqrt(Square(drop.velocityX) + Square(drop.velocityZ));
-        const float streakLength = _params.streakLength * GetRainLookTune().length * (1.0f + horizontalSpeed / speed);
+        const float streakLength = _params.streakLength * _params.modernLength * (1.0f + horizontalSpeed / speed);
         const Vector3 tailWorld = drop.position - velocity * (streakLength / speed);
 
         const Vector3 headView = toView * drop.position;
@@ -1095,8 +1081,16 @@ void RainSystem::DrawModern()
         const float dist = std::sqrt(distance2);
         // the nearest drops would draw long bright lines across the lens: fade them in over 3 m
         const float nearFade = std::clamp((dist - 0.6f) / 2.4f, 0.0f, 1.0f);
-        const float cosSun = std::max((toDrop * toSun) / std::max(dist, 1e-3f), 0.0f);
-        const float glint = 1.0f + 3.0f * sunGlint * std::pow(cosSun, 10.0f);
+        // Against the sun a drop is lit from behind and scatters the sun forward into the eye: a broad
+        // brightening (forward lobe) and a sharp glint round the sun. With the sun at your back it
+        // sends almost nothing back: the rain thins toward see-through (owner, 2026-10-26). Under a
+        // thick deck there is no sun to do either (sunGlint falls with the overcast).
+        const float cosSun = (toDrop * toSun) / std::max(dist, 1e-3f);
+        const float toward = std::max(cosSun, 0.0f);
+        const float away = std::max(-cosSun, 0.0f);
+        const float glint = std::max(1.0f + sunGlint * (1.2f * toward * toward + 3.0f * std::pow(toward, 10.0f)
+                                                        - 0.65f * away),
+                                     0.2f);
 
         Color colour = white;
         colour.SetA(std::clamp(streakAlpha * coverage * nearFade * glint, 0.0f, 1.0f) * (1.0f - fog));

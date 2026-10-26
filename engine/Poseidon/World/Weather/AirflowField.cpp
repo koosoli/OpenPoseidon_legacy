@@ -130,8 +130,8 @@ Vector3 EvaluateBlastWave(const BlastWave& blast, Vector3Par pos, float age)
     const float thick = 2.0f + blast.range * 0.5f + 4.0f * age;
     const float shell = std::exp(-Square((dist - front) / thick));
     const float behind = dist < front ? 0.25f * std::exp(-age / 0.6f) : 0.0f;
-    const float falloff = std::pow(std::max(blast.range, 0.5f) / std::max(dist, 0.5f), 1.5f);
-    const float speed = std::min(blast.speed * falloff, 60.0f) * (shell * std::exp(-age / 0.5f) + behind);
+    const float falloff = std::pow(std::max(blast.range, 0.5f) / std::max(dist, 0.5f), 1.2f);
+    const float speed = std::min(blast.speed * falloff, 70.0f) * (shell * std::exp(-age / 0.5f) + behind);
     if (speed < 0.05f)
         return VZero;
     // outward, lifted a little (the blast pushes up off the ground)
@@ -152,8 +152,9 @@ void AirflowField::AddBlast(Vector3Par position, float indirectHit, float indire
     b.position = position;
     b.time = Glob.time.toFloat();
     b.range = std::min(indirectHitRange, 30.0f);
-    // a grenade (indirect hit ~20) pushes ~9 m/s at its range, a shell (~300) ~35 m/s
-    b.speed = std::min(2.0f * std::sqrt(indirectHit), 40.0f);
+    // a grenade (indirect hit ~20) pushes ~16 m/s at its range, a shell (~300) ~60 m/s: the first
+    // pass (~9 / ~35, falling as d^-1.5) barely moved a fire 25 m from a 120 mm shell
+    b.speed = std::min(3.5f * std::sqrt(indirectHit), 60.0f);
 }
 
 Vector3 AirflowField::SampleBlast(Vector3Par pos) const

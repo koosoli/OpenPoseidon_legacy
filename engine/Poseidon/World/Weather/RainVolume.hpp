@@ -84,6 +84,11 @@ struct RainParams
 	/// flat on the ground. Drawing only: occlusion, puddles and wind are unchanged.
 	/// POSEIDON_RAIN_LOOK=1 forces it on; the Weather tab switches it.
 	bool modernLook = false;
+	/// RAIN-LOOK: a streak's opacity, its length (x streakLength) and the drop count (x targetDrops).
+	/// Fine, faint and many: the first pass (0.34 / 1.0 / 2.5x) read as white lines (owner).
+	float modernAlpha = 0.10f;
+	float modernLength = 0.5f;
+	float modernCount = 4.0f;
 
 	// -- ground interaction -----------------------------------------------
 	bool splashes = true;        ///< brief expanding sprite where a drop lands

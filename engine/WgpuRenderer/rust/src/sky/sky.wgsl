@@ -1844,8 +1844,9 @@ fn march_clouds(
     // (inscatter, transmittance) already dissolves toward the distance cap — no post fade needed.
     // (OP, RAIN-DECK) a raining deck is a dark one (owner, 2026-10-26: "when it rains make those rain
     // clouds darker"): nimbostratus is deep and water-laden, and its base reads slate grey where a dry
-    // overcast of the same coverage stays light. Heavy rain takes the deck's light to 40%.
-    res.inscatter = col * (1.0 - 0.6 * clamp(sky.weather.x, 0.0, 1.0));
+    // overcast of the same coverage stays light. Heavy rain takes the deck's light to 22% (40% was
+    // not dark enough, owner); a dry overcast is untouched.
+    res.inscatter = col * (1.0 - 0.78 * clamp(sky.weather.x, 0.0, 1.0));
     // The early-out above LEFT transmittance at the cut instead of driving it to zero, so a deck
     // that is opaque to the eye still passed ~1% of whatever was behind it. That is harmless for a
     // background of ordinary radiance and catastrophic for the sun disc, whose radiance is the solar
