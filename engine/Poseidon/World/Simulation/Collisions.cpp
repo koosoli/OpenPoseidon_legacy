@@ -1,4 +1,5 @@
 #include <Poseidon/World/Entities/Weapons/GrenadeFuse.hpp>
+#include <Poseidon/World/Weather/AirflowField.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 #include <Poseidon/World/Simulation/CollisionQueryMath.hpp>
@@ -1313,6 +1314,13 @@ void Landscape::ExplosionDammageEffects(EntityAI* owner, Shot* shot, Object* dir
                      shot ? shot->Speed().X() : 0.0f, shot ? shot->Speed().Y() : 0.0f, shot ? shot->Speed().Z() : 0.0f,
                      dir.X(), dir.Y(), dir.Z());
         BuildingBreach::Breach(directHit, pos, dir, type->indirectHit, type->indirectHitRange);
+    }
+
+    // BLAST-AIR: the blast wave pushes the air, and with it every other fire's flames and smoke
+    // (every client runs this, so every client's smoke moves alike).
+    if (type->explosive && type->indirectHit > 0 && type->indirectHitRange > 0)
+    {
+        GAirflow.AddBlast(pos, type->indirectHit, type->indirectHitRange);
     }
 
     // RFG-158: native Enfusion window panes inside the blast break (every client runs this).

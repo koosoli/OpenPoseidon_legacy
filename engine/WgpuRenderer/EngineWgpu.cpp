@@ -1,4 +1,5 @@
 #include "MeshRecordClosure.hpp"
+#include <Poseidon/World/Weather/AirflowField.hpp>
 #include "ObjectSnowSurface.hpp"
 #include "ChurchSnowSurface.hpp"
 #include "GroundMeshSurface.hpp"
@@ -22603,9 +22604,13 @@ void EngineWgpu::PushRenderParams()
                     float key;
                     std::memcpy(&key, &f.key, sizeof key);
                     WgrFireSource& w = _pendingSet.fireSources[i];
+                    // BLAST-AIR: another explosion's blast wave, sampled a third of the way up the
+                    // box, shoves this fire's flames and smoke (the fire's own blast is zero at its
+                    // centre)
+                    const Vector3 air = wind + GAirflow.SampleBlast(f.base + Vector3(0.0f, f.boxWidth * 0.33f, 0.0f));
                     w = WgrFireSource{{f.base.X(), f.base.Y(), f.base.Z(), f.radius},
                                       {f.intensity, f.smoke, key, static_cast<float>(f.kind)},
-                                      {wind.X(), wind.Y(), wind.Z(), f.boxWidth}};
+                                      {air.X(), air.Y(), air.Z(), f.boxWidth}};
                     std::memcpy(w.color, f.color, sizeof w.color);
                     std::memcpy(w.floor, f.floor, sizeof w.floor);
                     std::memcpy(w.ceiling, f.ceiling, sizeof w.ceiling);
