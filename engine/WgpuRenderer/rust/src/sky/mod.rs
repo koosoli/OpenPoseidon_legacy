@@ -78,6 +78,26 @@ fn sky_wgsl_validates_with_cloud_ms() {
     }
 }
 
+// CLOUD-SHADE (WGR_CLOUD_SHADE=1): darker bases validate with the deck, MS and WHOLE_WORLD in every mix.
+#[test]
+fn sky_wgsl_validates_with_cloud_shade() {
+    for mask in 0u32..8 {
+        let mut composer=crate::shaders::build_composer();
+        let mut defs=crate::shaders::shader_defs();
+        defs.insert("CLOUD_SHADE".to_string(),naga_oil::compose::ShaderDefValue::Bool(true));
+        if mask & 1 == 0 { defs.remove("CLOUD_MS"); }
+        if mask & 2 == 0 { defs.remove("CLOUD_DECK"); }
+        if mask & 4 == 0 { defs.remove("WHOLE_WORLD"); }
+        let module=composer.make_naga_module(naga_oil::compose::NagaModuleDescriptor {
+            source:include_str!("sky.wgsl"),file_path:"sky/sky.wgsl",shader_defs:defs,..Default::default()
+        }).unwrap_or_else(|e|panic!("compose sky with CLOUD_SHADE (mask {mask}): {}",e.emit_to_string(&composer)));
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(),naga::valid::Capabilities::all())
+            .validate(&module)
+            .unwrap_or_else(|e|panic!("sky.wgsl with CLOUD_SHADE (mask {mask}) fails validation: {e:?}"));
+        assert!(format!("{module:?}").contains("base_amb"),"CLOUD_SHADE did not compile in");
+    }
+}
+
 // CLOUD-DECK (default; WGR_CLOUD_DECK=0 = off): the two-stream deck term validates with and without CLOUD_MS and WHOLE_WORLD.
 #[test]
 fn sky_wgsl_validates_with_cloud_deck() {
