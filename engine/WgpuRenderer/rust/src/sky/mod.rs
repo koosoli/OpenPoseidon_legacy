@@ -1118,6 +1118,13 @@ fn cirrus_look_from_env() -> Option<(f32, f32)> {
     Some(v)
 }
 
+/// CIRRUS-PATCHES (`WGR_CIRRUS_PATCHES=1`, off until the owner has seen it): a sparse second layer
+/// gathers into ~10 km patches instead of an even grid of puffs (sky.wgsl cirrus_field).
+fn cirrus_patches_enabled() -> f32 {
+    static V: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *V.get_or_init(|| if std::env::var("WGR_CIRRUS_PATCHES").as_deref() == Ok("1") { 1.0 } else { 0.0 })
+}
+
 /// `WGR_CIRRUS_SOFT=<0..1>` — startup override for the second layer's edge softness, for the same
 /// reason the other sky overrides exist: `--benchmark` and `--test-type screenshot` run `--no-dev`,
 /// so the Sky tab cannot be reached and the control could not otherwise be captured at all.
@@ -1359,6 +1366,8 @@ pub struct Sky {
     rain: f32,
     /// CLOUD-SHADE: dark-base strength 0..1 (Sky tab "Dark bases"), into `weather.y`
     cloud_base_shade: f32,
+    /// OVERCAST-GLOOM: 0..1 (Sky tab "Overcast gloom"), into `weather.z`
+    overcast_gloom: f32,
     rain_now: f32,
     /// Eased, for the same reason the others are: this changes every cloud edge on screen at once.
     cirrus_soft_now: f32,
@@ -2658,6 +2667,7 @@ impl Sky {
             rain: 0.0,
             rain_now: 0.0,
             cloud_base_shade: 1.0,
+            overcast_gloom: 0.0,
             cirrus_soft_now: soft_env.unwrap_or(CIRRUS_SOFT_DEFAULT),
             earth_frame: [0.0; 4],
             earth_geometry: [[0.0; 4]; 4],
@@ -2825,6 +2835,11 @@ impl Sky {
 
     /// Second-layer EDGE SOFTNESS: 0 = the layer as it rendered before this existed, 1 = the big
     /// masses carry a deep soft fringe instead of a defined silhouette. Eased in `upload`.
+    /// OVERCAST-GLOOM: how much a closing deck darkens, 0..1.
+    pub fn set_overcast_gloom(&mut self, gloom: f32) {
+        self.overcast_gloom = if gloom.is_finite() { gloom.clamp(0.0, 1.0) } else { 0.0 };
+    }
+
     /// CLOUD-SHADE: how dark broken cloud's bases go, 0..1.
     pub fn set_cloud_base_shade(&mut self, strength: f32) {
         self.cloud_base_shade = if strength.is_finite() { strength.clamp(0.0, 1.0) } else { 1.0 };
@@ -2997,7 +3012,7 @@ impl Sky {
             // .w of the two axis lanes: the moon height map's range in metres (sky.wgsl moon_height_range).
             ecef_x: [self.earth_geometry[2][0], self.earth_geometry[2][1], self.earth_geometry[2][2], self.moon_relief_range[0]],
             ecef_z: [self.earth_geometry[3][0], self.earth_geometry[3][1], self.earth_geometry[3][2], self.moon_relief_range[1]],
-            weather: [self.rain_now, self.cloud_base_shade, 0.0, 0.0],
+            weather: [self.rain_now, self.cloud_base_shade, self.overcast_gloom, cirrus_patches_enabled()],
         };
         queue.write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&u));
         // Terrain sun-shadow mask mapping for cs_froxel's occlusion lookup (own copy so
@@ -3258,7 +3273,17 @@ impl Sky {
                 if let Some(prev) = target.prev_ivp {
                     let moved = (0..3).map(|i| (cur_cam[i] - target.prev_cam[i]).powi(2)).sum::<f32>();
                     let inv = glam::DMat4::from_cols_array_2d(&prev.map(|c| c.map(f64::from))).inverse();
-                    if moved < 400.0 && inv.is_finite() {
+                    // (2026-10-26) nor while the view turns fast. The history at a direction that
+                    // was behind a tree or a hill last frame holds no cloud (its march stopped at
+                    // the tree), and a fast turn uncovers it as sky: blue 2x2 blocks trailing
+                    // behind everything in front of an overcast (owner's screenshot). Over ~0.4 deg
+                    // a frame (24 deg/s at 60 fps) every pixel is marched.
+                    let centre = |m: &[[f32; 4]; 4]| {
+                        let v = glam::Mat4::from_cols_array_2d(m) * glam::Vec4::new(0.0, 0.0, 0.5, 1.0);
+                        (v.truncate() / v.w).normalize_or_zero()
+                    };
+                    let turned = centre(&prev).dot(centre(&cur_ivp)) < 0.999976;
+                    if moved < 400.0 && inv.is_finite() && !turned {
                         prev_vp = inv.as_mat4().to_cols_array_2d();
                         params[0] = 1.0;
                     }

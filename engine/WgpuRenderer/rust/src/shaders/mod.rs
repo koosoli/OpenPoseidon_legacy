@@ -84,7 +84,8 @@ pub(crate) fn shader_defs() -> std::collections::HashMap<String, naga_oil::compo
     }
     // look pack (2026-10-25), off by default until the owner picks it from A/B captures: TW_FOAM2
     // two-stage whitecaps (water_tw::foam2_enabled switches the FFT side with the same variable)
-    for (var, def) in [("WGR_TW_FOAM2", "TW_FOAM2")] {
+    // FOG_DITHER (2026-10-26): half a slice of jitter on the layered fog lookup, for A/B
+    for (var, def) in [("WGR_TW_FOAM2", "TW_FOAM2"), ("WGR_FOG_DITHER", "FOG_DITHER")] {
         if std::env::var(var).as_deref() == Ok("1") {
             defs.insert(def.to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
         }

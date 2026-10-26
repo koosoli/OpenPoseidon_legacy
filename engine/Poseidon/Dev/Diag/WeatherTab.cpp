@@ -428,6 +428,14 @@ void DrawRainSection()
             {
                 GWorld->SetWeather(savedOvercast, GWorld->GetFog(), 5.0f);
             }
+            // The forced rain is a SET rain (Weather::SetRain), and a set rain is held whatever the
+            // overcast does, so unticking left it pouring (owner, 2026-10-26: "when i stop the rain
+            // in dev tools by unchecking the rain box, it still continues"). Unticking stops it:
+            // the density falls to nothing over 5 s and stays dry until rain is set again.
+            if (GLandscape != nullptr)
+            {
+                GLandscape->SetRain(0.0f, 5.0f);
+            }
         }
     }
     if (ImGui::IsItemHovered())

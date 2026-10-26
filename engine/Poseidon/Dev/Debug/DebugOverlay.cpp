@@ -6431,6 +6431,10 @@ void DrawSkyTab()
     changed |= Dev::SliderFloat("Dark bases", &s.cloudBaseShade, 0.0f, 1.0f, "%.2f");
     Dev::PanelTooltip("How dark the undersides of broken cloud go below their sunlit tops (CLOUD-SHADE).\n"
                       "1 = the signed-off look, 0 = off. A closed overcast deck is not affected.");
+    changed |= Dev::SliderFloat("Overcast gloom", &s.overcastGloom, 0.0f, 1.0f, "%.2f");
+    Dev::PanelTooltip("Thick overcast gets darker the more it closes (60% to 100% overcast): the deck lets "
+                      "less light through and the auto-exposure no longer brightens it all back.\n"
+                      "0 = off (overcast brightened again above 70%), 1 = full.");
     changed |= Dev::SliderFloat("Max distance (m)", &s.cloudMaxDist, 5000.0f, 80000.0f, "%.0f");
     Dev::PanelTooltip("March / visibility cap; the far deck dissolves into the horizon haze");
 

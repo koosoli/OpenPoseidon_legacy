@@ -6249,6 +6249,19 @@ pub unsafe extern "C" fn wgr_set_cloud_base_shade(renderer: *mut WgrRenderer, st
     renderer.set_cloud_base_shade(strength);
 }
 
+/// OVERCAST-GLOOM: how much a closing deck darkens, 0..1 (Sky tab "Overcast gloom").
+///
+/// # Safety
+/// `renderer` must be a live renderer from `wgr_create`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_set_overcast_gloom(renderer: *mut WgrRenderer, gloom: f32) {
+    if renderer.is_null() {
+        return;
+    }
+    let renderer = unsafe { &mut *renderer };
+    renderer.set_overcast_gloom(gloom);
+}
+
 /// Fraction of the draw distance at which distance fog reaches FULL. 1.0 is the behaviour from
 /// before this existed: fog saturates only exactly at the far plane, so the terrain grid's edge,
 /// the object cull ring and the map boundary all sit right at the point where it finally closes,

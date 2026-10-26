@@ -2811,6 +2811,10 @@ impl Renderer {
         self.sky.set_cloud_base_shade(strength);
     }
 
+    fn set_overcast_gloom(&mut self, gloom: f32) {
+        self.sky.set_overcast_gloom(gloom);
+    }
+
     fn set_road_conform(&mut self, flat: f32, per_m: f32, max_frac: f32) {
         self.gfx3d.set_road_conform(flat, per_m, max_frac);
     }
