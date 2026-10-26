@@ -6426,6 +6426,9 @@ void DrawSkyTab()
     Dev::PanelTooltip("Beer-Powder dark-edge term (the fluffy look)");
     changed |= Dev::SliderFloat("Ambient fill", &s.cloudAmbient, 0.0f, 2.0f, "%.2f");
     Dev::PanelTooltip("Sky-ambient scale on the shadowed cloud sides");
+    changed |= Dev::SliderFloat("Dark bases", &s.cloudBaseShade, 0.0f, 1.0f, "%.2f");
+    Dev::PanelTooltip("How dark the undersides of broken cloud go below their sunlit tops (CLOUD-SHADE).\n"
+                      "1 = the signed-off look, 0 = off. A closed overcast deck is not affected.");
     changed |= Dev::SliderFloat("Max distance (m)", &s.cloudMaxDist, 5000.0f, 80000.0f, "%.0f");
     Dev::PanelTooltip("March / visibility cap; the far deck dissolves into the horizon haze");
 

@@ -90,7 +90,8 @@ struct Sky {
     moon_centre: vec4<f32>,
     ecef_x: vec4<f32>,
     ecef_z: vec4<f32>,
-    // (OP, RAIN-DECK) x: the weather's rain density 0..1, eased (renderer-written); yzw unused
+    // (OP, RAIN-DECK) x: the weather's rain density 0..1, eased (renderer-written); y: CLOUD-SHADE
+    // dark-base strength 0..1 (Sky tab "Dark bases"); zw unused
     weather: vec4<f32>,
 };
 
@@ -1842,7 +1843,7 @@ fn march_clouds(
             // body above it. The fill terms -- the sky ambient, the light scattered round inside it
             // (MS octaves, the deck term) -- reached the base almost as strongly as the top and washed
             // the shading out. Broken cloud only: an overcast deck (cov > ~0.85) is untouched.
-            let shade_k = 1.0 - smoothstep(0.55, 0.9, cov);
+            let shade_k = (1.0 - smoothstep(0.55, 0.9, cov)) * clamp(sky.weather.y, 0.0, 1.0);
             let base_amb = mix(1.0, 0.25 + 0.75 * smoothstep(0.0, 0.85, hfp), shade_k);
             let base_dir = mix(1.0, 0.45 + 0.55 * smoothstep(0.0, 0.7, hfp), shade_k);
             let scatter = direct * base_dir + ambient * base_amb;

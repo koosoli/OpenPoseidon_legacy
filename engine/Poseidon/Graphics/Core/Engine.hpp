@@ -2232,6 +2232,7 @@ class Engine : public IGraphicsEngine
         float cloudHgG = 0.35f;                            // forward-scatter anisotropy (silver lining)
         float cloudPowder = 1.0f;                          // Beer-Powder dark-edge strength (0..1)
         float cloudAmbient = 1.0f;                         // sky-ambient fill scale on the shadowed sides
+        float cloudBaseShade = 1.0f;                       // CLOUD-SHADE: how dark broken cloud's bases go (0 = off)
         float cloudMaxDist = 60000.0f;                     // march / visibility cap (m); keep <= ~80 km
         // SECOND CLOUD LAYER — high cirrus at ~7 km, above the cumulus deck. It is what stops the
         // sky reading as one populated slab with clear air above it. Off = the upper sky is bare.

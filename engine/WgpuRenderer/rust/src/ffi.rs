@@ -6236,6 +6236,19 @@ pub unsafe extern "C" fn wgr_set_cirrus_softness(renderer: *mut WgrRenderer, sof
     renderer.set_cirrus_softness(softness);
 }
 
+/// CLOUD-SHADE: how dark broken cloud's bases go below their sunlit tops, 0..1 (Sky tab "Dark bases").
+///
+/// # Safety
+/// `renderer` must be a live renderer from `wgr_create`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_set_cloud_base_shade(renderer: *mut WgrRenderer, strength: f32) {
+    if renderer.is_null() {
+        return;
+    }
+    let renderer = unsafe { &mut *renderer };
+    renderer.set_cloud_base_shade(strength);
+}
+
 /// Fraction of the draw distance at which distance fog reaches FULL. 1.0 is the behaviour from
 /// before this existed: fog saturates only exactly at the far plane, so the terrain grid's edge,
 /// the object cull ring and the map boundary all sit right at the point where it finally closes,
