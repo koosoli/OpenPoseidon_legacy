@@ -1,5 +1,6 @@
 
 #include <Poseidon/Core/Config/EngineConfig.hpp>
+#include <Poseidon/World/Weather/AirflowField.hpp>
 #include <cstdlib>
 #include <algorithm>
 #include <Poseidon/World/Effects/SmokeWorldQuery.hpp> // SMK-030: room lookup + contained step
@@ -946,6 +947,16 @@ void Cloudlet::Simulate(float deltaT, SimulationImportance prec)
     }
     // simulate acceleration
     _speed[1] += _accY * deltaT;
+    // BLAST-AIR: another explosion's blast wave shoves the puff (outdoors); the side friction below
+    // brakes it back to the drift afterwards
+    if (_roomId < 0)
+    {
+        const Vector3 gust = GAirflow.SampleBlast(Position());
+        if (gust.SquareSize() > 0.01f)
+        {
+            _speed += (gust - _speed) * std::min(deltaT * 6.0f, 1.0f) * 0.6f;
+        }
+    }
     if (_smokeShadow && GLandscape != nullptr && _roomId < 0)
     {
         // FIRE-002: smoke in the air drifts with the wind as it is NOW. The 2001 puff took the

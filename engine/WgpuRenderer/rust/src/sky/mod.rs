@@ -852,6 +852,8 @@ struct SkyUniform {
     moon_centre: [f32; 4],
     ecef_x: [f32; 4],
     ecef_z: [f32; 4],
+    // (OP, RAIN-DECK) x: the weather's rain density, eased; the deck darkens with it. yzw unused.
+    weather: [f32; 4],
 }
 
 // The atmosphere-only fields that determine the LUTs (sun/night/exposure excluded,
@@ -1333,6 +1335,9 @@ pub struct Sky {
     /// 1 = big masses carry a deep soft fringe instead of a defined silhouette. Weighted by local
     /// coverage in the shader, so it reaches the banks and not the isolated wisps.
     cirrus_soft: f32,
+    /// RAIN-DECK: the weather's rain density as set (`set_rain`) and as eased toward it per upload
+    rain: f32,
+    rain_now: f32,
     /// Eased, for the same reason the others are: this changes every cloud edge on screen at once.
     cirrus_soft_now: f32,
     earth_frame: [f32; 4],
@@ -2628,6 +2633,8 @@ impl Sky {
             cirrus_amount_now: look_env.map_or(CIRRUS_AMOUNT_DEFAULT, |v| v.0),
             cirrus_match_now: look_env.map_or(CIRRUS_MATCH_DEFAULT, |v| v.1),
             cirrus_soft: soft_env.unwrap_or(CIRRUS_SOFT_DEFAULT),
+            rain: 0.0,
+            rain_now: 0.0,
             cirrus_soft_now: soft_env.unwrap_or(CIRRUS_SOFT_DEFAULT),
             earth_frame: [0.0; 4],
             earth_geometry: [[0.0; 4]; 4],
@@ -2795,6 +2802,11 @@ impl Sky {
 
     /// Second-layer EDGE SOFTNESS: 0 = the layer as it rendered before this existed, 1 = the big
     /// masses carry a deep soft fringe instead of a defined silhouette. Eased in `upload`.
+    /// RAIN-DECK: the weather's rain density (0..1); the cloud deck darkens as it rains.
+    pub fn set_rain(&mut self, rain: f32) {
+        self.rain = if rain.is_finite() { rain.clamp(0.0, 1.0) } else { 0.0 };
+    }
+
     pub fn set_cirrus_softness(&mut self, softness: f32) {
         self.cirrus_soft = softness.clamp(0.0, 1.0);
     }
@@ -2881,6 +2893,8 @@ impl Sky {
             sky.cloud4[2],
         );
         self.cirrus_puff_now += (target - self.cirrus_puff_now) * CIRRUS_PUFF_EASE;
+        // RAIN-DECK: a few seconds to follow the rain, so a scripted downpour darkens the deck, not cuts it
+        self.rain_now += (self.rain - self.rain_now) * 0.03;
         // Same ease, same rate, for the two look sliders. They have no time variation of their own
         // (they are authored settings, not weather), so the target IS the setting.
         self.cirrus_amount_now += (self.cirrus_amount - self.cirrus_amount_now) * CIRRUS_PUFF_EASE;
@@ -2955,6 +2969,7 @@ impl Sky {
             // .w of the two axis lanes: the moon height map's range in metres (sky.wgsl moon_height_range).
             ecef_x: [self.earth_geometry[2][0], self.earth_geometry[2][1], self.earth_geometry[2][2], self.moon_relief_range[0]],
             ecef_z: [self.earth_geometry[3][0], self.earth_geometry[3][1], self.earth_geometry[3][2], self.moon_relief_range[1]],
+            weather: [self.rain_now, 0.0, 0.0, 0.0],
         };
         queue.write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&u));
         // Terrain sun-shadow mask mapping for cs_froxel's occlusion lookup (own copy so
@@ -3983,6 +3998,7 @@ mod sky_uniform_layout_tests {
             "moon_centre",
             "ecef_x",
             "ecef_z",
+            "weather",
         ];
         assert_eq!(
             wgsl, rust,

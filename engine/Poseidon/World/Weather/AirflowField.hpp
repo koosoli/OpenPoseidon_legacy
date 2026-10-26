@@ -51,6 +51,23 @@ struct RotorWash
 /// by every particle in the world, so this stays small on purpose.
 inline constexpr std::size_t kMaxRotorWash = 4;
 
+/// BLAST-AIR (owner, 2026-10-26: "make it that the shockwave of one bomb affects the smoke and fire
+/// of another bomb impact"): an explosion's blast wave as air. A shell of outward air that runs out
+/// from the blast and fades within about a second and a half; behind it a weaker outflow. Every
+/// reader of the airflow -- smoke particles, flames, the fire boxes, the 2001 smoke puffs -- feels
+/// it, so one impact shoves the smoke and fire of another. Events, not state: a blast is its place,
+/// its time and its size, so two machines that saw the same explosions agree on the air.
+struct BlastWave
+{
+    Vector3 position{VZero}; ///< where it went off
+    float time = 0.0f;       ///< game time it went off (Glob.time as seconds)
+    float range = 0.0f;      ///< the ammo's indirect-hit range, m: the wave is strongest there
+    float speed = 0.0f;      ///< outward air speed at `range`, m/s
+};
+inline constexpr std::size_t kMaxBlastWaves = 8;
+/// The blast wave model, exposed for tests: air velocity of `blast` at `pos`, `age` s after it.
+Vector3 EvaluateBlastWave(const BlastWave& blast, Vector3Par pos, float age);
+
 class AirflowField
 {
   public:
@@ -73,6 +90,12 @@ class AirflowField
     /// from the weather, but a helicopter hovering over a blown-open roof still
     /// pushes the air in the room.
     Vector3 SampleLocal(Vector3Par pos) const;
+    /// Just the blast waves (BLAST-AIR), for readers that keep their own wind (the 2001 smoke
+    /// puffs, the fire boxes): zero when no explosion is recent.
+    Vector3 SampleBlast(Vector3Par pos) const;
+    /// Register an explosion (Landscape::ExplosionDammageEffects): its ammo's indirect hit and range.
+    void AddBlast(Vector3Par position, float indirectHit, float indirectHitRange);
+    std::size_t BlastCount() const;
 
     std::size_t RotorCount() const { return _count; }
     const RotorWash& Rotor(std::size_t index) const { return _rotors[index]; }
@@ -91,6 +114,8 @@ class AirflowField
   private:
     RotorWash _rotors[kMaxRotorWash]{};
     std::size_t _count = 0;
+    BlastWave _blasts[kMaxBlastWaves]{};
+    std::size_t _blastNext = 0;
     bool _localEnabled = true;
     float _localScale = 1.0f;
 };

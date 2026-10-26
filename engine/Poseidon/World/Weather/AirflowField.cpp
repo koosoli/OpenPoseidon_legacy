@@ -1,12 +1,14 @@
 #include <Poseidon/World/Weather/AirflowField.hpp>
 
 #include <Poseidon/World/Weather/WindModel.hpp>
+#include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Entities/Vehicles/Air/Helicopter.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 
 namespace Poseidon
@@ -108,9 +110,82 @@ Vector3 EvaluateRotorWash(const RotorWash& wash, Vector3Par pos)
     return velocity;
 }
 
+// BLAST-AIR. The visible push of a blast, not its physics: the shell runs out at 150 m/s (a real
+// shock is faster, but then the push is one frame and nobody sees smoke move), carries the ammo's
+// strength at its indirect-hit range falling off as (range/d)^1.5, is a few metres thick, and fades
+// over half a second; a weaker outflow follows it out for a second more.
+constexpr float kBlastFront = 150.0f;
+constexpr float kBlastLife = 1.6f;
+
+Vector3 EvaluateBlastWave(const BlastWave& blast, Vector3Par pos, float age)
+{
+    if (age < 0.0f || age > kBlastLife || blast.speed <= 0.0f)
+        return VZero;
+    Vector3 d = pos - blast.position;
+    const float dist = d.Size();
+    // inside the fireball the air has no single direction: the blast's own fire and smoke are its own
+    if (dist < std::max(0.5f, blast.range * 0.4f))
+        return VZero;
+    const float front = kBlastFront * age;
+    const float thick = 2.0f + blast.range * 0.5f + 4.0f * age;
+    const float shell = std::exp(-Square((dist - front) / thick));
+    const float behind = dist < front ? 0.25f * std::exp(-age / 0.6f) : 0.0f;
+    const float falloff = std::pow(std::max(blast.range, 0.5f) / std::max(dist, 0.5f), 1.2f);
+    const float speed = std::min(blast.speed * falloff, 70.0f) * (shell * std::exp(-age / 0.5f) + behind);
+    if (speed < 0.05f)
+        return VZero;
+    // outward, lifted a little (the blast pushes up off the ground)
+    d[1] = std::max(d.Y(), 0.0f) + dist * 0.15f;
+    return d * (speed / std::max(d.Size(), 1e-3f));
+}
+
+void AirflowField::AddBlast(Vector3Par position, float indirectHit, float indirectHitRange)
+{
+    static const bool enabled = [] {
+        const char* v = std::getenv("POSEIDON_BLAST_AIR");
+        return v == nullptr || v[0] != '0';
+    }();
+    if (!enabled || indirectHit <= 0.0f || indirectHitRange <= 0.0f || !std::isfinite(position.X()))
+        return;
+    BlastWave& b = _blasts[_blastNext];
+    _blastNext = (_blastNext + 1) % kMaxBlastWaves;
+    b.position = position;
+    b.time = Glob.time.toFloat();
+    b.range = std::min(indirectHitRange, 30.0f);
+    // a grenade (indirect hit ~20) pushes ~16 m/s at its range, a shell (~300) ~60 m/s: the first
+    // pass (~9 / ~35, falling as d^-1.5) barely moved a fire 25 m from a 120 mm shell
+    b.speed = std::min(3.5f * std::sqrt(indirectHit), 60.0f);
+}
+
+Vector3 AirflowField::SampleBlast(Vector3Par pos) const
+{
+    if (!_localEnabled)
+        return VZero;
+    const float now = Glob.time.toFloat();
+    Vector3 air(VZero);
+    for (const BlastWave& b : _blasts)
+    {
+        if (b.speed > 0.0f && now - b.time <= kBlastLife)
+            air += EvaluateBlastWave(b, pos, now - b.time);
+    }
+    return air * _localScale;
+}
+
+std::size_t AirflowField::BlastCount() const
+{
+    const float now = Glob.time.toFloat();
+    std::size_t n = 0;
+    for (const BlastWave& b : _blasts)
+        n += (b.speed > 0.0f && now - b.time >= 0.0f && now - b.time <= kBlastLife) ? 1 : 0;
+    return n;
+}
+
 void AirflowField::Reset()
 {
     _count = 0;
+    for (BlastWave& b : _blasts)
+        b = BlastWave{};
+    _blastNext = 0;
 }
 
 void AirflowField::Update(Vector3Par focus)
@@ -204,12 +279,12 @@ void AirflowField::Update(Vector3Par focus)
 
 Vector3 AirflowField::SampleLocal(Vector3Par pos) const
 {
-    if (!_localEnabled || _count == 0)
+    if (!_localEnabled)
     {
         return VZero;
     }
 
-    Vector3 local(VZero);
+    Vector3 local = SampleBlast(pos) * (1.0f / std::max(_localScale, 1e-4f));
     for (std::size_t i = 0; i < _count; ++i)
     {
         local += EvaluateRotorWash(_rotors[i], pos);

@@ -584,6 +584,23 @@ void DrawRainSection()
         }
 
         ImGui::SeparatorText("Look");
+        if (ImGui::Checkbox("New rain look", &params.modernLook))
+        {
+            changed = true;
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Drops lit by the scene (bright against dark ground, faint against the sky,\n"
+                              "glinting toward the sun), thin tapered streaks and flat ring splashes.\n"
+                              "Drawing only: roofs, puddles and wind are unchanged. The tint sliders\n"
+                              "below apply to the old look only.");
+        }
+        if (params.modernLook)
+        {
+            changed |= ImGui::SliderFloat("New look: visibility", &params.modernAlpha, 0.02f, 0.4f, "%.2f");
+            changed |= ImGui::SliderFloat("New look: streak length", &params.modernLength, 0.2f, 1.5f, "%.2f");
+            changed |= ImGui::SliderFloat("New look: drops (x)", &params.modernCount, 1.0f, 8.0f, "%.1f");
+        }
         if (ImGui::SliderFloat("Streak length (m)", &params.streakLength, 0.2f, 3.0f, "%.2f"))
         {
             changed = true;
