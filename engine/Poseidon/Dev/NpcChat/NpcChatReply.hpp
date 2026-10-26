@@ -46,6 +46,8 @@ enum class OrderKind
     GetOut,     // dismount
     LineUp,     // "line up", "stand in a line": a real line of soldiers, not the formation (where: optional centre)
     Priority,   // Conquest: HQ puts the weight of the war on an objective (value: its name); no squad member moves
+    Barrage,    // Conquest: HQ fires the mortars on an objective (value: its name)
+    AirStrike,  // Conquest: HQ sends the attack plane on an objective (value: its name)
     Invalid
 };
 

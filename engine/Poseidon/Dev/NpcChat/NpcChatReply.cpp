@@ -162,6 +162,10 @@ OrderKind ParseOrderKind(const std::string& name)
         return OrderKind::GetOut;
     if (OneOf(n, {"priority", "main_effort", "focus", "hq_priority"}))
         return OrderKind::Priority;
+    if (OneOf(n, {"barrage", "mortars", "mortar_barrage", "artillery", "fire_support"}))
+        return OrderKind::Barrage;
+    if (OneOf(n, {"air_strike", "airstrike", "air_support", "close_air_support", "cas"}))
+        return OrderKind::AirStrike;
     return OrderKind::Invalid;
 }
 
@@ -185,13 +189,15 @@ const char* OrderKindName(OrderKind kind)
         case OrderKind::GetOut: return "get_out";
         case OrderKind::LineUp: return "line_up";
         case OrderKind::Priority: return "priority";
+        case OrderKind::Barrage: return "barrage";
+        case OrderKind::AirStrike: return "air_strike";
         default: return "invalid";
     }
 }
 
 std::string NormaliseOrderValue(OrderKind kind, const std::string& value)
 {
-    if (kind == OrderKind::Priority)
+    if (kind == OrderKind::Priority || kind == OrderKind::Barrage || kind == OrderKind::AirStrike)
         return Trim(value); // an objective's name, checked by Conquest itself
     std::string v = Upper(Trim(value));
     std::replace(v.begin(), v.end(), '_', ' ');
@@ -373,10 +379,13 @@ bool ParseReply(const std::string& text, const std::string& fallbackSpeaker, Rep
         const std::string rawValue = StringField(item, "value");
         order.value = NormaliseOrderValue(order.kind, rawValue);
 
-        bool ok = order.kind != OrderKind::Invalid && (order.all || !order.to.empty() || order.kind == OrderKind::Priority);
+        const bool toHq = order.kind == OrderKind::Priority || order.kind == OrderKind::Barrage || order.kind == OrderKind::AirStrike;
+        bool ok = order.kind != OrderKind::Invalid && (order.all || !order.to.empty() || toHq);
         switch (order.kind)
         {
-            case OrderKind::Priority: ok = ok && !order.value.empty(); break;
+            case OrderKind::Priority:
+            case OrderKind::Barrage:
+            case OrderKind::AirStrike: ok = ok && !order.value.empty(); break;
             case OrderKind::Stance:
             case OrderKind::CombatMode:
             case OrderKind::Behaviour:

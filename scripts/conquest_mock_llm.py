@@ -3,7 +3,8 @@
     python scripts/conquest_mock_llm.py <port> good|garbage <log file>
 
 `good` answers a commander request with a fixed, valid Conquest plan, and an NPC chat request (the
-player talking to HQ) with HQ agreeing to make Figari the main effort; `garbage` answers with prose
+player talking to HQ) with HQ agreeing to make Figari the main effort (or, asked for "mortars on Figari",
+calling the mortars there); `garbage` answers with prose
 that holds no plan. Every request's report (the user message the game sent) is appended to the log, so
 a test can check what the model was told -- including the commander's memory of earlier decisions.
 Nothing leaves the machine and no API key is involved.
@@ -37,8 +38,14 @@ class Handler(BaseHTTPRequestHandler):
         with open(LOG, "a", encoding="utf-8") as log:
             log.write("=== request\n" + report + "\n")
         everything = json.dumps(request) if isinstance(request, dict) else ""
+        users = [m.get("content", "") for m in request.get("messages", []) if m.get("role") == "user"] if isinstance(request, dict) else []
+        last = users[-1].lower() if users else ""
         if MODE != "good":
             content = "I think we should attack something soon."
+        elif "SITUATION REPORT" in everything and "mortars on figari" in last:
+            # The player asks HQ for fire support: HQ calls the mortars on Figari.
+            content = json.dumps({"say": [{"speaker": "HQ", "text": "Copy, mortars on Figari."}],
+                                  "orders": [{"to": "all", "order": "barrage", "value": "Figari"}]})
         elif "SITUATION REPORT" in everything:
             # NPC chat: the player talking to HQ. HQ agrees and asks for the main effort.
             content = json.dumps({"say": [{"speaker": "HQ", "text": "Roger, putting everything on Figari."}],

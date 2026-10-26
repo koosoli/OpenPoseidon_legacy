@@ -25,6 +25,8 @@ class CfgConquest
     commanderView = 1;   // the top-down command view (Ctrl+M)
     fog = "contacts";    // or "shroud": unexplored ground stays black in the command view
     enemyMarkers = 0;    // symbols over the enemy the side knows of in the command view (setup screen)
+    aiSkill = 1;         // the AI soldiers: 0 recruits, 1 regulars, 2 veterans (setup screen)
+    // <SIDE>llmModel = "gemini-2.5-flash"; // an LLM commander's own model (setup screen; empty: the panel's)
     hqRadio = 1;         // the AI commander radios its orders while the player is not in command
     // A side's commander personality: "balanced", "aggressive" or "cautious" (the AI's posture).
     WESTpersonality = "balanced";

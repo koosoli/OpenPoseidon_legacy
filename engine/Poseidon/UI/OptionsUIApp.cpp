@@ -634,6 +634,34 @@ void DisplayMain::OnChildDestroyed(int idd, int exit)
 {
     switch (idd)
     {
+        case ConquestIslandIdd: // CONQUEST's island chooser: the single-mission launch of that island's war
+        {
+            const std::string chosen = exit == IDC_OK ? ConquestIslandChoice() : std::string();
+            Display::OnChildDestroyed(idd, exit);
+            if (chosen.empty())
+                break;
+            const RString mission(chosen.c_str());
+        const RString dir = ResolveSPMissionSubdir("OpenPoseidon\\", mission);
+        if (!std::filesystem::exists(std::string((const char*)(dir + mission + RString("\\mission.sqm")))))
+        {
+            CreateMsgBox(MB_BUTTON_OK, RString("Conquest is not installed: its content pack (assets\\Mods\\@OP_Conquest) "
+                                               "is missing or disabled."));
+            break;
+        }
+        CurrentTemplate.Clear();
+        if (GWorld->UI())
+            GWorld->UI()->Init();
+        CurrentCampaign = "";
+        CurrentBattle = "";
+        CurrentMission = "";
+        SetCampaign("");
+        if (!ProcessTemplateName(mission, dir))
+            break;
+        GStats.ClearAll();
+        ApplyCurrentMissionViewDistance();
+        CreateChild(new DisplayIntro(this));
+        break;
+        }
         case ArmaContentIdd: // the mounted Arma game's campaign or mission (ArmaContentMenu)
         {
             bool campaign = false;
@@ -2433,27 +2461,7 @@ void DisplayMain::OnButtonClicked(int idc)
     if (idc == WholeWorldMenuId) { CreateChild(CreateWholeWorldDisplay(this)); return; }
     if (idc == ConquestMenuId)
     {
-        // The single-mission launch (IDD_SINGLE_MISSION below), for the one war @OP_Conquest ships.
-        const RString mission("conquest-everon.Eden");
-        const RString dir = ResolveSPMissionSubdir("OpenPoseidon\\", mission);
-        if (!std::filesystem::exists(std::string((const char*)(dir + mission + RString("\\mission.sqm")))))
-        {
-            CreateMsgBox(MB_BUTTON_OK, RString("Conquest is not installed: its content pack (assets\\Mods\\@OP_Conquest) "
-                                               "is missing or disabled."));
-            return;
-        }
-        CurrentTemplate.Clear();
-        if (GWorld->UI())
-            GWorld->UI()->Init();
-        CurrentCampaign = "";
-        CurrentBattle = "";
-        CurrentMission = "";
-        SetCampaign("");
-        if (!ProcessTemplateName(mission, dir))
-            return;
-        GStats.ClearAll();
-        ApplyCurrentMissionViewDistance();
-        CreateChild(new DisplayIntro(this));
+        CreateChild(CreateConquestIslandDisplay(this)); // the island first; OnChildDestroyed starts its war
         return;
     }
     if (_arma3)

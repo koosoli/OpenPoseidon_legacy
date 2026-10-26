@@ -775,15 +775,38 @@ TEST_CASE("NpcChat: a cut-off answer is recovered, never shown or spoken as JSON
     CHECK_THAT(tts.body, ContainsSubstring("\"text\":\"Morning, sir.\""));
 }
 
-TEST_CASE("NpcChat: hold Caps Lock to talk by default; the old End default is upgraded", "[npcchat]")
+TEST_CASE("NpcChat: hold U to talk by default; the old End and Caps Lock defaults are upgraded", "[npcchat]")
 {
-    CHECK(Settings().talkKey == 57); // SDL_SCANCODE_CAPSLOCK
+    // Not Caps Lock: that is the game's own voice-over-net key (VoiceOverNetPushToTalk).
+    CHECK(Settings().talkKey == 24); // SDL_SCANCODE_U
     Settings old;
     REQUIRE(SettingsFromJson(R"({"version":3,"talkKey":77})", old));
-    CHECK(old.talkKey == 57);
+    CHECK(old.talkKey == 24);
+    Settings capsLock;
+    REQUIRE(SettingsFromJson(R"({"version":4,"talkKey":57})", capsLock));
+    CHECK(capsLock.talkKey == 24);
     Settings custom;
     REQUIRE(SettingsFromJson(R"({"version":3,"talkKey":42})", custom));
     CHECK(custom.talkKey == 42); // a key the player chose stays
+}
+
+TEST_CASE("NpcChat: live (realtime voice) models are not offered for chat", "[npcchat]")
+{
+    // gemini-3.8-live answered every chat request with HTTP 400 (bidiGenerateContent only), 2026-10-26.
+    CHECK_FALSE(IsChatModelId("gemini-3.8-live"));
+    CHECK_FALSE(IsChatModelId("models/gemini-2.5-flash-native-audio-preview"));
+    CHECK_FALSE(IsChatModelId("gpt-4o-realtime-preview"));
+    CHECK(IsChatModelId("gemini-2.5-flash"));
+}
+
+TEST_CASE("NpcChat: a voice pool for another provider is not sent to Gemini", "[npcchat]")
+{
+    Settings s;
+    s.tts = TtsProvider::Gemini;
+    s.ttsVoices = "pNInz6obpgDQGcFmaJgB,iP95p4xoKVk53GoZ742B"; // ElevenLabs ids
+    CHECK(s.EffectiveTtsVoices() == DefaultTtsVoices(TtsProvider::Gemini));
+    s.ttsVoices = "Orus, pNInz6obpgDQGcFmaJgB, charon";
+    CHECK(s.EffectiveTtsVoices() == "Orus,Charon");
 }
 
 TEST_CASE("NpcChat: moderation models are not offered and their verdicts are never spoken", "[npcchat]")

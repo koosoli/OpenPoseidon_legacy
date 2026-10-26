@@ -84,3 +84,19 @@ TEST_CASE("NPC chat: a request to HQ for a main effort parses as a priority orde
     CHECK(reply.orders[0].value == "Figari"); // the name as given, not upper-cased
     CHECK(reply.rejected.empty());
 }
+
+TEST_CASE("NPC chat: a request to HQ for mortars or the plane parses as a support order", "[conquest][llm]")
+{
+    using namespace Poseidon::NpcChat;
+    Reply reply;
+    REQUIRE(ParseReply(R"({"say": [{"speaker": "HQ", "text": "Mortars on Figari, splash in seven."}],
+        "orders": [{"to": "all", "order": "mortars", "value": " Figari "},
+                   {"to": "all", "order": "air_support", "value": "Tyrone"}]})",
+                       "HQ", reply));
+    REQUIRE(reply.orders.size() == 2);
+    CHECK(reply.orders[0].kind == OrderKind::Barrage);
+    CHECK(reply.orders[0].value == "Figari");
+    CHECK(reply.orders[1].kind == OrderKind::AirStrike);
+    CHECK(reply.orders[1].value == "Tyrone");
+    CHECK(reply.rejected.empty());
+}

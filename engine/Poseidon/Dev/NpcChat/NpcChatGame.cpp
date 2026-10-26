@@ -899,6 +899,8 @@ std::vector<std::string> ExecuteOrders(int registryId, const std::vector<Order>&
     for (const Order& order : requested)
         if (order.kind == OrderKind::Priority)
             log.push_back(Conquest::RequestPriority(order.value));
+        else if (order.kind == OrderKind::Barrage || order.kind == OrderKind::AirStrike)
+            log.push_back(Conquest::RequestSupport(order.value, order.kind == OrderKind::AirStrike));
         else
             orders.push_back(order);
     if (orders.empty())

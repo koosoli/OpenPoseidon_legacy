@@ -14,6 +14,11 @@ inline constexpr int IslandEditorMenuId = 62200;
 /// The game keeps running. Returns false with `error` set when it cannot.
 bool LaunchIslandEditor(std::string& error);
 
-/// Main menu "CONQUEST": starts the Everon war from the @OP_Conquest pack (Missions\OpenPoseidon).
+/// Main menu "CONQUEST": the island chooser, then that island's war from the @OP_Conquest pack
+/// (Missions\OpenPoseidon).
 inline constexpr int ConquestMenuId = 62300;
+inline constexpr int ConquestIslandIdd = 62310;
+Display* CreateConquestIslandDisplay(ControlsContainer* parent);
+/// The mission the island chooser closed on ("conquest-malden.Abel"), "" when it was left with Back.
+std::string ConquestIslandChoice();
 } // namespace Poseidon

@@ -42,6 +42,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <cjson/cJSON.h>
 #include <map>
 
 GameValue A1UnitCreate(const GameState* state, GameValuePar oper1, GameValuePar oper2); // GameStateExtWorld.cpp
@@ -475,6 +476,8 @@ std::vector<std::string> Strings(const ParamEntry& cls, const char* name)
     return out;
 }
 
+#include "ConquestRefereeProfile.inc"
+
 // The island's towns: CfgWorlds >> world >> Names, villages and up (hills, bays and woods left out).
 // An island whose config names none (Kolgujev) lists them in the mission: CfgConquest >> Places.
 std::vector<Place> IslandPlaces(const ParamEntry& conquest)
@@ -568,6 +571,7 @@ bool LoadConfig(Referee& r, const ParamEntry& cfg)
     r.config.defaults.timeLimit = std::max(0, static_cast<int>(Number(cfg, "timeLimit", 0.0f)));
     r.config.defaults.resistanceAlly = Number(cfg, "resistanceFriendlyWest", 0.0f) != 0.0f;
     r.config.defaults.enemyMarkers = Number(cfg, "enemyMarkers", 0.0f) != 0.0f;
+    r.config.defaults.aiSkill = std::clamp(static_cast<int>(Number(cfg, "aiSkill", 1.0f)), 0, 2);
     r.config.barrageRange = Number(cfg, "barrageRange", r.config.barrageRange);
     r.config.supportDelay = std::max(0.0f, Number(cfg, "supportDelay", r.config.supportDelay));
     r.config.airCost = Number(cfg, "airStrikeCost", r.config.airCost);
@@ -596,6 +600,7 @@ bool LoadConfig(Referee& r, const ParamEntry& cfg)
         r.config.flagTexture[s] = Text(cfg, (label + "flag").c_str(),
                                        engine == TWest ? "usa_vlajka.pac" : engine == TEast ? "rus_vlajka.pac" : "guba_vlajka.pac");
         r.config.personality[s] = Text(cfg, (label + "personality").c_str(), "balanced");
+        r.config.defaults.llmModel[s] = Text(cfg, (label + "llmModel").c_str(), "");
         r.config.airPlane[s] = Text(cfg, (label + "airStrikePlane").c_str(), engine == TWest ? "A10" : "Su25");
         r.config.airPilot[s] = Text(cfg, (label + "airStrikePilot").c_str(),
                                     engine == TWest ? "SoldierWPilot" : engine == TEast ? "SoldierEPilot" : "SoldierGPilot");
@@ -764,6 +769,8 @@ bool LoadConfig(Referee& r, const ParamEntry& cfg)
             if (r.config.engineSide[s] == player->GetTargetSide())
                 r.options.side = s;
     r.setupPending = r.config.setup;
+    if (r.setupPending && GWorld->GetMode() != GModeNetware)
+        LoadSettings(r.options, r.war.sideCount); // the setup screen opens on the last war's settings
     if (GWorld->GetMode() == GModeNetware)
     {
         // Multiplayer: every player has their own slot, side and respawn; no setup screen, no body swapping.
@@ -845,19 +852,32 @@ void FrontDir(const Referee& r, int side, int o, float& dx, float& dy)
 // Where a new vehicle parks at objective `o`: rows behind the base, away from the front, 28 m apart side
 // by side and 35 m deep (a helicopter takes more room). Each vehicle gets the next slot, so a squad's truck,
 // the tanks and the helicopter no longer appear on one spot and drive into each other.
+Vector3 SpawnPoint(const Referee& r, int side, int o);
+
 Vector3 ParkingSlot(Referee& r, int side, int o, bool big)
 {
     if (r.parked.size() != r.war.defs.size())
         r.parked.assign(r.war.defs.size(), 0);
-    const int slot = r.parked[o]++ % 18;
     float fx, fy;
     FrontDir(r, side, o, fx, fy);
     const float px = -fy, py = fx; // across the front
-    const int row = slot / 6, col = slot % 6;
-    const float lateral = (col % 2 ? 1.0f : -1.0f) * (static_cast<float>(col / 2) + 0.5f) * (big ? 45.0f : 28.0f);
     const ObjectiveDef& d = r.war.defs[o];
-    const float back = d.radius * 0.6f + 30.0f + static_cast<float>(row) * 35.0f;
-    return Ground(d.x - fx * back + px * lateral, d.y - fy * back + py * lateral);
+    // Dry land only: behind Morton is the beach, and a helicopter parked in the surf counts as unusable --
+    // the AI then took it from its squad and could not board it. A slot below 3 m is skipped; with none
+    // left, the vehicle parks beside the base's spawn point as it used to.
+    for (int tries = 0; tries < 18; tries++)
+    {
+        const int slot = r.parked[o]++ % 18;
+        const int row = slot / 6, col = slot % 6;
+        const float lateral = (col % 2 ? 1.0f : -1.0f) * (static_cast<float>(col / 2) + 0.5f) * (big ? 45.0f : 28.0f);
+        const float back = d.radius * 0.6f + 30.0f + static_cast<float>(row) * 35.0f;
+        const float x = d.x - fx * back + px * lateral, y = d.y - fy * back + py * lateral;
+        if (GLandscape && GLandscape->SurfaceY(x, y) >= 3.0f)
+            return Ground(x, y);
+    }
+    const Vector3 at = SpawnPoint(r, side, o);
+    const float off = 14.0f * static_cast<float>(r.parked[o] % 6 + 1);
+    return Ground(at.X() + off, at.Z() + off * 0.5f);
 }
 
 Vector3 SpawnPoint(const Referee& r, int side, int o)
@@ -890,13 +910,32 @@ Vector3 TaskPoint(const ObjectiveDef& d, int groupId)
     return Ground(d.x + std::cos(angle) * reach, d.y + std::sin(angle) * reach);
 }
 
+// Every squad move goes through here. A squad whose helicopter has set down for good walks: AIGroup::Move
+// sends a squad more than 200 m from its destination back into its vehicles, and the parked helicopter is no
+// longer theirs (the soak logged the AI's get-in checks failing for its six men). So it goes in hops of 180 m;
+// TrackGroups gives the next as soon as one is done.
+void MoveGroup(GroupRecord& rec, const Vector3& destination)
+{
+    AIGroup* grp = rec.group;
+    Vector3 go = destination;
+    if (rec.parkedHeli && grp->Leader())
+    {
+        const Vector3 p = grp->Leader()->Position();
+        const float dx = destination.X() - p.X(), dz = destination.Z() - p.Z();
+        const float d = std::hypot(dx, dz);
+        if (d > 180.0f)
+            go = Ground(p.X() + dx / d * 180.0f, p.Z() + dz / d * 180.0f);
+    }
+    grp->Move(grp->MainSubgroup(), go, Command::Undefined);
+}
+
 void Order(GroupRecord& rec, const ObjectiveDef& d, float now)
 {
     AIGroup* grp = rec.group;
     if (!grp || !grp->MainSubgroup())
         return;
     rec.destination = TaskPoint(d, rec.id);
-    grp->Move(grp->MainSubgroup(), rec.destination, Command::Undefined);
+    MoveGroup(rec, rec.destination);
     rec.orderedAt = now;
     rec.holding = false;
     rec.landing = false;
@@ -909,7 +948,7 @@ void OrderPoint(GroupRecord& rec, const Vector3& destination, float now)
     if (!grp || !grp->MainSubgroup())
         return;
     rec.destination = destination;
-    grp->Move(grp->MainSubgroup(), rec.destination, Command::Undefined);
+    MoveGroup(rec, rec.destination);
     rec.orderedAt = now;
     rec.holding = false;
     rec.landing = false;
@@ -943,6 +982,14 @@ bool IsSupply(const Referee& r, const GroupRecord& rec);
 int HqOf(const Referee& r, int side);
 bool KeepSupplyTrucks(Referee& r, int side, float now);
 
+GameValue RunWith(const char* code, const GameValue& o, const GameValue& p, const RString& t);
+
+// Tanks and aircraft: deployed only at the HQ or an airfield (CONQUEST-PLAN.md 3.4).
+bool Heavy(const SquadDef& d)
+{
+    return d.role == "armour" || d.role == "gunship" || d.role == "air";
+}
+
 int SpawnSquad(Referee& r, int side, int base, bool free, int type = 0)
 {
     if (type < 0 || type >= static_cast<int>(r.config.squads.size()))
@@ -952,7 +999,12 @@ int SpawnSquad(Referee& r, int side, int base, bool free, int type = 0)
     GameState* gs = GWorld->GetGameState();
     if (!center || !gs || center->NGroups() >= MaxGroups || squad.classes[side].empty())
         return 0;
-    const Vector3 at = SpawnPoint(r, side, base);
+    // A squad with vehicles of its own deploys beside its first parking slot: its men start at their vehicle
+    // (spawned 100 m apart, the AI's get-in lost track of which vehicle was whose and failed its checks).
+    const bool big = squad.role == "air" || squad.role == "gunship";
+    const bool parks = !squad.vehicles[side].empty();
+    const Vector3 firstSpot = parks ? ParkingSlot(r, side, base, big) : VZero;
+    const Vector3 at = parks ? Ground(firstSpot.X() + 9.0f, firstSpot.Z() + 9.0f) : SpawnPoint(r, side, base);
     Ref<AIGroup> group = new AIGroup();
     center->AddGroup(group);
     group->AddFirstWaypoint(at);
@@ -975,6 +1027,8 @@ int SpawnSquad(Referee& r, int side, int base, bool free, int type = 0)
         const GameValue made1 = A1UnitCreate(gs, GameValueExt(group.GetRef()), args);
         if (EntityAI* unit = dyn_cast<EntityAI>(GetObject(made1)))
         {
+            static const float skill[3] = {0.35f, 0.6f, 0.85f}; // recruits, regulars, veterans
+            RunWith("_o setSkill _p", GameValueExt(unit), GameValue(skill[std::clamp(r.options.aiSkill, 0, 2)]), RString());
             UnitRecord u;
             u.unit = unit;
             u.side = side;
@@ -993,9 +1047,7 @@ int SpawnSquad(Referee& r, int side, int base, bool free, int type = 0)
     int parked = 0;
     for (const RString& cls : squad.vehicles[side])
     {
-        ++parked;
-        const bool big = squad.role == "air" || squad.role == "gunship";
-        const Vector3 spot = ParkingSlot(r, side, base, big);
+        const Vector3 spot = parked++ == 0 ? firstSpot : ParkingSlot(r, side, base, big);
         if (EntityAI* veh = CreateVehicleAt(cls, spot.X(), spot.Z()))
         {
             if (Transport* transport = dyn_cast<Transport>(veh))
@@ -1358,7 +1410,8 @@ void TrackGroups(Referee& r, float now)
             }
             else if (std::hypot(grp->Leader()->Position().X() - rec.destination.X(),
                                 grp->Leader()->Position().Z() - rec.destination.Z()) > 30.0f &&
-                     now - rec.orderedAt > ReorderSeconds && grp->MainSubgroup() && !grp->MainSubgroup()->HasCommand())
+                     (now - rec.orderedAt > ReorderSeconds || rec.parkedHeli) && grp->MainSubgroup() &&
+                     !grp->MainSubgroup()->HasCommand())
                 OrderPoint(rec, rec.destination, now);
         }
         else if (rec.task != TaskKind::None && rec.objective >= 0)
@@ -1399,7 +1452,7 @@ void TrackGroups(Referee& r, float now)
                     const float a = static_cast<float>(rec.nudges) * 2.39996f + static_cast<float>(rec.id);
                     const float off = 30.0f + 15.0f * static_cast<float>(rec.nudges % 4);
                     rec.destination = Ground(d.x + std::cos(a) * off, d.y + std::sin(a) * off);
-                    grp->Move(grp->MainSubgroup(), rec.destination, Command::Undefined);
+                    MoveGroup(rec, rec.destination);
                     rec.orderedAt = now;
                     WarLog(Name(rec.side) + " group " + std::to_string(rec.id) + " stuck on the way to " + d.name +
                            ": ordered again by another way");
@@ -1412,7 +1465,8 @@ void TrackGroups(Referee& r, float now)
                 WarLog(Name(rec.side) + " group " + std::to_string(rec.id) + " stalled on the way to " + d.name);
             }
             // The order can be used up (reached, or replaced by combat); give it again if still far.
-            if (!grp->IsAnyPlayerGroup() && dist > d.captureRadius * 1.2f && now - rec.orderedAt > ReorderSeconds && grp->MainSubgroup() &&
+            if (!grp->IsAnyPlayerGroup() && dist > d.captureRadius * 1.2f &&
+                (now - rec.orderedAt > ReorderSeconds || rec.parkedHeli) && grp->MainSubgroup() &&
                 !grp->MainSubgroup()->HasCommand())
                 Order(rec, d, now);
         }
@@ -1485,10 +1539,11 @@ int ChooseSquadType(const Referee& r, int side, int base)
         if (CanAttack(r.war, side, static_cast<int>(o)))
             front = std::min(front, std::hypot(r.war.defs[o].x - r.war.defs[base].x, r.war.defs[o].y - r.war.defs[base].y));
     const float pool = BudgetAt(r, side, base); // the HQ's pool, or the base's own stock
+    const bool heavyHere = r.war.defs[base].kind == ObjectiveKind::HQ || r.war.defs[base].kind == ObjectiveKind::Airfield;
     const auto affordable = [&](int t)
     {
         const SquadDef& d = r.config.squads[t];
-        return d.aiBuys && !d.classes[side].empty() && pool >= d.cost &&
+        return d.aiBuys && !d.classes[side].empty() && pool >= d.cost && (heavyHere || !Heavy(d)) &&
                r.live[side] + static_cast<int>(d.classes[side].size()) <= r.config.cap;
     };
     // Every fourth purchase is heavy: a tank platoon or a gunship, alternately. They cost a lot, so
@@ -1503,7 +1558,7 @@ int ChooseSquadType(const Referee& r, int side, int base)
             for (size_t t = 0; t < r.config.squads.size(); t++)
             {
                 const SquadDef& d = r.config.squads[t];
-                if (d.role != role || !d.aiBuys || d.classes[side].empty() ||
+                if (d.role != role || !d.aiBuys || d.classes[side].empty() || !heavyHere ||
                     r.live[side] + static_cast<int>(d.classes[side].size()) > r.config.cap)
                     continue;
                 if (pool >= d.cost)
@@ -2199,7 +2254,7 @@ void LlmStep(Referee& r, float now)
         std::string why;
         r.lastLlmAsk[s] = now;
         r.llmEpoch[s] = r.captureEpoch;
-        if (!Llm::Ask(s, SideReport(r, s, now), ObjectiveNames(r), SquadTypeNames(r), &why))
+        if (!Llm::Ask(s, SideReport(r, s, now), ObjectiveNames(r), SquadTypeNames(r), &why, r.options.llmModel[s]))
         {
             if (now - r.lastLlmFailure[s] > 300.0f)
                 WarLog(Name(s) + " LLM commander not asked: " + why + "; the standard commander carries on");
@@ -2708,6 +2763,7 @@ LSError SerializeSaved(ParamArchive& ar, Saved& w)
         PARAM_CHECK(ar.Serialize("timeLimit", w.options.timeLimit, 1, 0))
         PARAM_CHECK(ar.Serialize("resistanceAlly", w.options.resistanceAlly, 1, false))
         PARAM_CHECK(ar.Serialize("enemyMarkers", w.options.enemyMarkers, 1, false))
+        PARAM_CHECK(ar.Serialize("aiSkill", w.options.aiSkill, 1, 1))
         PARAM_CHECK(ar.Serialize("warStart", w.warStart, 1, -1.0f))
         PARAM_CHECK(ar.Serialize("winner", w.winner, 1, NoSide))
         PARAM_CHECK(SerializeText(ar, "winReason", w.winReason))
@@ -2735,6 +2791,7 @@ LSError SerializeSaved(ParamArchive& ar, Saved& w)
         PARAM_CHECK(sub.Serialize("bought", w.bought[s], 1, 0))
         PARAM_CHECK(sub.Serialize("lastBarrage", w.lastBarrage[s], 1, -1.0e9f))
         PARAM_CHECK(sub.Serialize("startPool", w.options.startPool[s], 1, 500.0f))
+        PARAM_CHECK(SerializeText(sub, "llmModel", w.options.llmModel[s]))
         bool llm = w.options.llmCommander[s];
         PARAM_CHECK(sub.Serialize("llmCommander", llm, 1, false))
         w.options.llmCommander[s] = llm;
@@ -3128,6 +3185,8 @@ bool CanBuyFor(const Referee& r, int side, int base, int type, std::string* reas
     }
     else if (!SpawnEligible(r.war, side, base, Now(), r.tuning, reason))
         return false;
+    if (Heavy(def) && r.war.defs[base].kind != ObjectiveKind::HQ && r.war.defs[base].kind != ObjectiveKind::Airfield)
+        return refuse("tanks and aircraft deploy at the HQ (or an airfield)");
     if (def.role == "supply" && r.war.defs[base].kind != ObjectiveKind::HQ)
         return refuse("supply trucks are loaded at the HQ: deploy them there");
     if (BudgetAt(r, side, base) < def.cost)
@@ -3218,16 +3277,28 @@ bool BarrageFor(Referee& r, int side, float x, float y, std::string* reason)
         seed = seed * 1664525u + 1013904223u;
         return static_cast<float>(seed >> 8) / static_cast<float>(1u << 24);
     };
+    // Accurate with an observer: a soldier of the side within a kilometre of the target walks the rounds in
+    // (40 m); without one they land by the map, scattered over 120 m (CONQUEST-PLAN.md 3.8).
+    bool observer = false;
+    if (AICenter* center = GWorld->GetCenter(r.config.engineSide[side]))
+        for (int g = 0; g < center->NGroups() && !observer; g++)
+            if (AIGroup* grp = center->GetGroup(g))
+                for (int id = 1; id <= MAX_UNITS_PER_GROUP && !observer; id++)
+                    if (AIUnit* unit = grp->UnitWithID(id); Alive(unit) &&
+                                                         std::hypot(unit->Position().X() - x, unit->Position().Z() - y) < 1000.0f)
+                        observer = true;
+    const float spread = observer ? r.config.barrageSpread : std::max(r.config.barrageSpread, 120.0f);
     for (int i = 0; i < r.config.barrageShells; i++)
     {
-        const float a = random() * 6.2831853f, d = std::sqrt(random()) * r.config.barrageSpread;
+        const float a = random() * 6.2831853f, d = std::sqrt(random()) * spread;
         r.shells.push_back({now + 7.0f + static_cast<float>(i) * 1.1f + random() * 0.6f, x + std::cos(a) * d,
                             y + std::sin(a) * d});
     }
     char where[64];
     std::snprintf(where, sizeof(where), "%.0f, %.0f", x, y);
     WarLog(Name(side) + " mortar barrage on " + where);
-    Radio(r, side, "Mortars firing, " + std::to_string(r.config.barrageShells) + " rounds. Splash in seven seconds.");
+    Radio(r, side, "Mortars firing, " + std::to_string(r.config.barrageShells) + " rounds. Splash in seven seconds." +
+                       (observer ? "" : " No observer near the target: the rounds will scatter."));
     // Friendly squads near the target hear it is coming.
     for (const GroupRecord& rec : r.groups)
     {
@@ -3593,6 +3664,14 @@ std::vector<std::string> SideNames()
     return out;
 }
 
+std::string RequestSupport(const std::string& objective, bool air)
+{
+    Referee& r = R();
+    if (!r.active || !r.started || r.playerSide == NoSide)
+        return "HQ: there is no war to support.";
+    return SupportRequestFor(r, r.playerSide, objective, air);
+}
+
 void SetSupportDelay(float seconds)
 {
     R().config.supportDelay = std::max(0.0f, seconds);
@@ -3675,6 +3754,7 @@ bool BeginWar(const Options& options)
         return false; // the Resistance is out of this war
     r.options = options;
     r.setupPending = false;
+    SaveSettings(options); // the next war's setup opens on these
     return true;
 }
 
@@ -4467,7 +4547,9 @@ std::string HqReport()
         out += "The player's own squad is ordered to: " + order.text + ".\n";
     out += "When the player asks HQ to put the weight of the war on an objective, answer as HQ and add the order "
            "{\"to\": \"all\", \"order\": \"priority\", \"value\": \"<objective name>\"}. HQ cannot push an objective "
-           "the side may not attack yet (only ones next to a held objective).\n";
+           "the side may not attack yet (only ones next to a held objective). When the player asks for mortars or "
+           "an air strike on an objective, answer as HQ and add {\"to\": \"all\", \"order\": \"barrage\", \"value\": "
+           "\"<objective name>\"} (or \"air_strike\"); HQ says whether it fires.\n";
     return out;
 }
 
@@ -4526,6 +4608,29 @@ std::string StatusText()
     return out;
 }
 } // namespace Poseidon::Conquest
+
+// conquestStats: [started, ended, sides, squads, [soldiers alive per side], [objectives held per side]] -- the
+// war in numbers for scripted tests (tests/integration/conquest).
+static GameValue ConquestStatsNular(const GameState* state)
+{
+    const Poseidon::Conquest::Snapshot& snap = Poseidon::Conquest::GetSnapshot();
+    GameValue result = state->CreateGameValue(GameArray);
+    GameArrayType& a = result;
+    a.Add(GameValue(snap.active && Poseidon::Conquest::PlayerSide() != Poseidon::Conquest::NoSide && !Poseidon::Conquest::SetupPending()));
+    a.Add(GameValue(snap.winner != Poseidon::Conquest::NoSide));
+    a.Add(GameValue(static_cast<float>(snap.war.sideCount)));
+    a.Add(GameValue(static_cast<float>(snap.groups.size())));
+    GameValue live = state->CreateGameValue(GameArray);
+    GameValue owned = state->CreateGameValue(GameArray);
+    for (int s = 0; s < snap.war.sideCount; s++)
+    {
+        static_cast<GameArrayType&>(live).Add(GameValue(static_cast<float>(snap.live[s])));
+        static_cast<GameArrayType&>(owned).Add(GameValue(static_cast<float>(Poseidon::Conquest::OwnedCount(snap.war, s))));
+    }
+    a.Add(live);
+    a.Add(owned);
+    return result;
+}
 
 static GameValue ConquestStateNular(const GameState*)
 {
@@ -4798,5 +4903,6 @@ INIT_MODULE(ConquestReferee, 3)
     GGameState.NewFunction(GameFunction(GameAny, "conquestTakeControl", ConquestTakeControlUnary, GameScalar));
     GGameState.NewFunction(GameFunction(GameAny, "conquestBuy", ConquestBuyUnary, GameArray));
     GGameState.NewNularOp(GameNular(GameString, "conquestState", ConquestStateNular));
+    GGameState.NewNularOp(GameNular(GameArray, "conquestStats", ConquestStatsNular));
     GGameState.NewFunction(GameFunction(GameBool, "conquestMapClick", ConquestMapClickUnary, GameArray));
 };

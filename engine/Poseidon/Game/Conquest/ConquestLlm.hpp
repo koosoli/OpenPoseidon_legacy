@@ -41,7 +41,7 @@ bool ParseAdvice(const std::string& text, const std::vector<std::string>& object
 /// Ask for advice for `side` with `report` (one request in flight per side; returns false when one
 /// is already running or the LLM is not configured, with the reason in `why`).
 bool Ask(int side, const std::string& report, const std::vector<std::string>& objectives,
-         const std::vector<std::string>& squadTypes, std::string* why = nullptr);
+         const std::vector<std::string>& squadTypes, std::string* why = nullptr, const std::string& model = std::string());
 bool InFlight(int side);
 
 struct Answer

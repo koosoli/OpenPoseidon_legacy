@@ -131,6 +131,10 @@ Invoke-Case 'good' 'good' {
     Check (WaitFor 'WEST HQ: the player asked for Figari as the main effort' 40) 'good: the player''s request to HQ becomes WEST''s main effort'
     $t = Send @{cmd = 'npc_chat_transcript' }
     Check ((($t.lines | ForEach-Object { $_.text }) -join "`n") -match 'Figari') 'good: HQ answers in the transcript'
+    # The player asks HQ for mortars: the conversation's barrage order reaches the war (fired, or refused with
+    # the reason, e.g. support not ready yet).
+    $null = Send @{cmd = 'npc_chat_say'; text = 'HQ, mortars on Figari.' }
+    Check (WaitFor 'WEST HQ: the player asked for mortars on Figari' 40) 'good: the player''s request for mortars reaches HQ'
 }
 
 Invoke-Case 'garbage' 'garbage' {

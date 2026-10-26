@@ -225,8 +225,13 @@ struct Options
     int timeLimit = 0;             // minutes of war; then the higher war score wins. 0: off
     bool resistanceAlly = false;   // the Resistance fights with WEST (with resistance on)
     bool enemyMarkers = false;     // the enemy the side knows of, as symbols in the command view and its minimap
+    int aiSkill = 1;               // the AI soldiers: 0 recruits, 1 regulars, 2 veterans
+    std::array<std::string, MaxSides> llmModel; // an LLM commander's own model ("": the AI & voice panel's)
 };
 
+/// The player asks HQ (in the conversation) for mortars or the attack plane on an objective by name: HQ's
+/// answer, fired or refused with the reason.
+std::string RequestSupport(const std::string& objective, bool air);
 /// No mortars or air strikes this long into the war (CfgConquest supportDelay; conquestStart may set it).
 void SetSupportDelay(float seconds);
 /// Seconds of war left under the time limit, or -1 when there is none.

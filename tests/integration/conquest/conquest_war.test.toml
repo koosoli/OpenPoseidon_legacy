@@ -1,0 +1,8 @@
+tags = ["conquest", "retail-data"]
+binary = "PoseidonGame"
+mission = "content/default-packs/conquest/missions/conquest-everon.Eden"
+timeout = 300
+assert_timeout = 60
+# Needs the retail data (Everon). The war's rules come with the mission folder (conquest.hpp, objectives.hpp);
+# the referee is the engine's (engine/Poseidon/Game/Conquest). CONQUEST-PLAN.md section 7.
+extra_args = ["--no-splash"]

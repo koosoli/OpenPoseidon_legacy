@@ -139,11 +139,13 @@ bool ParseAdvice(const std::string& text, const std::vector<std::string>& object
 }
 
 bool Ask(int side, const std::string& report, const std::vector<std::string>& objectives,
-         const std::vector<std::string>& squadTypes, std::string* why)
+         const std::vector<std::string>& squadTypes, std::string* why, const std::string& model)
 {
     if (side < 0 || side >= Sides)
         return false;
-    const NpcChat::Settings settings = NpcChat::CurrentSettings(); // a copy for the worker
+    NpcChat::Settings settings = NpcChat::CurrentSettings(); // a copy for the worker
+    if (!model.empty())
+        settings.llmModel = model; // this side's own model
     const std::string key = NpcChat::GetKey(NpcChat::LlmKeySlot(settings.llm));
     if (key.empty() && settings.llm != NpcChat::LlmProvider::Ollama && settings.llm != NpcChat::LlmProvider::Custom)
     {

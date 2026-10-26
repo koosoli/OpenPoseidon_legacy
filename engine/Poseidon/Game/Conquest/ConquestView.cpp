@@ -2315,6 +2315,15 @@ void DrawSetup()
         if (ImGui::RadioButton("Shroud: unexplored ground stays black (top-down view only)", o.fog == FogMode::Shroud))
             o.fog = FogMode::Shroud;
         ImGui::Checkbox("Enemy markers: symbols over the enemy your side knows of", &o.enemyMarkers);
+        Label(Font().body, 13.0f, ColMuted, "AI soldiers");
+        if (ImGui::RadioButton("Recruits", o.aiSkill == 0))
+            o.aiSkill = 0;
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Regulars", o.aiSkill == 1))
+            o.aiSkill = 1;
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Veterans", o.aiSkill == 2))
+            o.aiSkill = 2;
         ImGui::Checkbox("Taking control of any of your soldiers", &o.possession);
         ImGui::Checkbox("HQ radios its orders", &o.hqRadio);
         ImGui::Spacing();
@@ -2329,6 +2338,17 @@ void DrawSetup()
             const std::string label = SideTitle(static_cast<int>(i)) + ": LLM commander (Hybrid)";
             if (ImGui::Checkbox(label.c_str(), &llm))
                 o.llmCommander[i] = llm;
+            if (o.llmCommander[i])
+            {
+                // This side's own model; empty: the AI & voice panel's.
+                static std::array<std::array<char, 96>, MaxSides> models{};
+                if (models[i][0] == 0 && !o.llmModel[i].empty())
+                    std::snprintf(models[i].data(), models[i].size(), "%s", o.llmModel[i].c_str());
+                ImGui::SetNextItemWidth(220.0f);
+                if (ImGui::InputTextWithHint("model##side", "model (empty: the AI & voice panel's)", models[i].data(),
+                                             models[i].size()))
+                    o.llmModel[i] = models[i].data();
+            }
             ImGui::PopID();
         }
         ImGui::EndGroup();

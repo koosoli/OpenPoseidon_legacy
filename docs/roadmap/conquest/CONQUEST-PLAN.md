@@ -806,3 +806,31 @@ fill (a scripted spawn) rather than the war's own purchasing.
 - **File split:** the referee's air support, supply line, contextual orders and multiplayer command moved to
   `ConquestRefereeAir.inc`, `ConquestRefereeSupply.inc`, `ConquestRefereeOrders.inc` and
   `ConquestRefereeCommand.inc` (the FileSize gate stops at 5000 lines).
+
+### Status 2026-10-26 (night): the audit's leftovers
+
+An audit of every owner request and every plan item (the checklist is in the side-session notes) left these,
+now done:
+
+- **The CONQUEST menu chooses the island** (Everon, Malden, Kolgujev, Nogova): `UI/ConquestIslandDisplay.cpp`,
+  started from `DisplayMain::OnChildDestroyed`.
+- **AI soldiers' skill** (setup: recruits / regulars / veterans, `aiSkill`): `setSkill` 0.35 / 0.6 / 0.85 on
+  every soldier the war makes.
+- **A different LLM model per side** (setup, `<SIDE>llmModel`).
+- **The last war's settings are kept** in the profile (`conquest-settings.json`): the setup screen opens on
+  them and New war starts with them (3.7, 4.6). Single player only.
+- **Tanks and aircraft deploy only at the HQ or an airfield** (3.4); the AI buys them there.
+- **Mortar accuracy depends on an observer** (3.8): 40 m with a soldier of the side within 1 km of the
+  target, 120 m without (a distance test, not a true line of sight).
+- **Asking HQ for fire support** (3.8): in the HQ conversation, "mortars on Figari" or an air strike becomes
+  a `barrage` / `air_strike` order; HQ fires or says why not.
+- **A Trident integration test** (7): `tests/integration/conquest/conquest_war` boots the Everon war with both
+  sides on the AI and checks it through `conquestStats`. Its strict mode found a real bug at once: WEST's
+  helicopter was parked in the surf behind Morton, counted as unusable, and its squad could never board
+  (`AISubgroupFSM` check failures). Parking slots now need dry land 3 m above the sea.
+
+Deliberately different from the plan: the death handling (the owner asked that the player carries on in
+another soldier rather than a paid redeploy screen); artillery flight time and cooldown (7 s and 2 minutes as
+built and played, plus the 5-minute start delay). Not done: virtual far groups (not needed at a cap of 80);
+imported worlds (each needs a mission and testing on that world's data); a radio-menu (0-8) entry for taking
+command (Ctrl+M does it).

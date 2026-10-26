@@ -3,6 +3,44 @@
 // board, get out / land and unload, land, to base, supply runs, fight). Included by ConquestReferee.cpp inside
 // its anonymous namespace.
 
+// The player asks HQ for mortars (or the plane) on an objective by name: fired at the densest group of
+// enemies the side knows of there, else at the objective's post. HQ's answer either way.
+std::string SupportRequestFor(Referee& r, int side, const std::string& objective, bool air)
+{
+    int found = -1;
+    for (size_t o = 0; o < r.war.defs.size(); o++)
+        if (_stricmp(r.war.defs[o].name.c_str(), objective.c_str()) == 0)
+            found = static_cast<int>(o);
+    if (found < 0)
+        return "HQ: no objective called " + objective + ".";
+    const ObjectiveDef& d = r.war.defs[found];
+    float x = d.x, y = d.y, best = 0.0f;
+    const std::vector<Contact> enemies = KnownEnemies(side);
+    for (const Contact& c : enemies)
+    {
+        if (c.age > 90.0f || std::hypot(c.x - d.x, c.y - d.y) > d.radius + 150.0f)
+            continue;
+        float score = 0.0f;
+        for (const Contact& e : enemies)
+            if (e.age <= 90.0f && std::hypot(e.x - c.x, e.y - c.y) <= 60.0f)
+                score += e.vehicle ? 2.0f : 1.0f;
+        if (score > best)
+        {
+            best = score;
+            x = c.x;
+            y = c.y;
+        }
+    }
+    std::string why;
+    const bool fired = air ? AirStrikeFor(r, side, x, y, &why) : BarrageFor(r, side, x, y, &why);
+    WarLog(Name(side) + " HQ: the player asked for " + (air ? "an air strike" : "mortars") + " on " + d.name +
+           (fired ? "" : " -- refused: " + why));
+    if (!fired)
+        return "HQ: negative, " + why + ".";
+    return air ? "HQ: air support inbound to " + d.name + ", about forty seconds."
+               : "HQ: mortars firing on " + d.name + (best > 0.0f ? ", on the enemy we have seen there." : ".");
+}
+
 // The building or vehicle nearest (x, y), within 30 m, that is not the side's own; nullptr if none.
 EntityAI* TargetNear(const Referee& r, int side, float x, float y)
 {
