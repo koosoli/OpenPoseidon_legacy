@@ -98,7 +98,7 @@ Invoke-Run 'A-soldier' {
     Check ((Eval 'conquestStart ["WEST", "soldier", "contacts", "noview"]') -eq 'true') 'A: the war starts from conquestStart'
     Start-Sleep -Seconds 12
     Shot 'soldier-hq-order'
-    Check ((LogCount 'HQ to the player''s squad') -ge 1) 'A: HQ gave the player''s squad an order'
+    Check ((LogCount 'HQ to the player squad') -ge 1) 'A: HQ gave the player''s squad an order'
     Check ((LogCount 'Conquest: the war begins') -eq 1) 'A: the war began once'
     foreach ($k in 1..2) {
         $null = Eval 'player setDammage 1'

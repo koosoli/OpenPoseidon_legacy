@@ -1,0 +1,25 @@
+# Conquest in multiplayer: a dedicated server runs the war on Everon, a client mirrors it and commands
+# its side through the server. Needs the retail game data (Everon): run with
+#   tri test --data-dir "<ARMA Cold War Assault>" tests/integration/multiplayer/conquest_dedicated.test
+mission = "content/default-packs/conquest/mpmissions/conquest-everon-mp.Eden"
+game_port = 0
+timeout = 240
+assert_timeout = 90
+
+tags = ["headful", "network", "exclusive", "retail-data"]
+
+[[instances]]
+extra_args = ["--no-strict", "--mp-auto-start", "1", "--log-format", "jsonl"]
+name = "server"
+type = "server"
+
+[[instances]]
+extra_args = ["--no-strict", "--name", "conquest-client", "--log-format", "jsonl"]
+name = "client"
+type = "client"
+connect = "server"
+after = "server"
+start_delay_ms = 1000
+use_mission = false
+no_autotest = true
+machine_id = "trident:conquest_dedicated:client"

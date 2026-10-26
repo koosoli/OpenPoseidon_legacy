@@ -1,0 +1,64 @@
+version=11;
+class Mission
+{
+	randomSeed=1985;
+	class Intel
+	{
+		briefingName="Conquest: Everon";
+		briefingDescription="BLUFOR from Morton, OPFOR from the airfield: take the towns' command posts.";
+		startWeather=0.2;
+		forecastWeather=0.3;
+		startFog=0;
+		forecastFog=0;
+		year=1985;
+		month=6;
+		day=21;
+		hour=9;
+		minute=0;
+	};
+	class Groups
+	{
+		items=2;
+		class Item0
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=8;
+				class Item0 { position[]={5100,0,3915}; azimut=0; id=0; side="WEST"; vehicle="OfficerW"; player="PLAY CDG"; leader=1; rank="LIEUTENANT"; skill=0.8; };
+				class Item1 { position[]={5104,0,3912}; azimut=0; id=1; side="WEST"; vehicle="SoldierWB"; player="PLAY CDG"; skill=0.6; };
+				class Item2 { position[]={5108,0,3915}; azimut=0; id=2; side="WEST"; vehicle="SoldierWMG"; player="PLAY CDG"; skill=0.6; };
+				class Item3 { position[]={5112,0,3912}; azimut=0; id=3; side="WEST"; vehicle="SoldierWLAW"; player="PLAY CDG"; skill=0.6; };
+				class Item4 { position[]={5096,0,3912}; azimut=0; id=4; side="WEST"; vehicle="SoldierWB"; player="PLAY CDG"; skill=0.6; };
+				class Item5 { position[]={5092,0,3915}; azimut=0; id=5; side="WEST"; vehicle="SoldierWMedic"; player="PLAY CDG"; skill=0.6; };
+				class Item6 { position[]={5116,0,3915}; azimut=0; id=6; side="WEST"; vehicle="SoldierWB"; player="PLAY CDG"; skill=0.6; };
+				class Item7 { position[]={5088,0,3912}; azimut=0; id=7; side="WEST"; vehicle="SoldierWAT"; player="PLAY CDG"; skill=0.6; };
+			};
+		};
+		class Item1
+		{
+			side="EAST";
+			class Vehicles
+			{
+				items=8;
+				class Item0 { position[]={4740,0,10870}; azimut=180; id=8; side="EAST"; vehicle="OfficerE"; player="PLAY CDG"; leader=1; rank="LIEUTENANT"; skill=0.8; };
+				class Item1 { position[]={4744,0,10873}; azimut=180; id=9; side="EAST"; vehicle="SoldierEB"; player="PLAY CDG"; skill=0.6; };
+				class Item2 { position[]={4748,0,10870}; azimut=180; id=10; side="EAST"; vehicle="SoldierEMG"; player="PLAY CDG"; skill=0.6; };
+				class Item3 { position[]={4752,0,10873}; azimut=180; id=11; side="EAST"; vehicle="SoldierELAW"; player="PLAY CDG"; skill=0.6; };
+				class Item4 { position[]={4736,0,10873}; azimut=180; id=12; side="EAST"; vehicle="SoldierEB"; player="PLAY CDG"; skill=0.6; };
+				class Item5 { position[]={4732,0,10870}; azimut=180; id=13; side="EAST"; vehicle="SoldierEMedic"; player="PLAY CDG"; skill=0.6; };
+				class Item6 { position[]={4756,0,10870}; azimut=180; id=14; side="EAST"; vehicle="SoldierEB"; player="PLAY CDG"; skill=0.6; };
+				class Item7 { position[]={4728,0,10873}; azimut=180; id=15; side="EAST"; vehicle="SoldierEAT"; player="PLAY CDG"; skill=0.6; };
+			};
+		};
+	};
+	class Markers
+	{
+		items=2;
+		class Item0 { position[]={5104,0,3925}; name="respawn_west"; type="Empty"; };
+		class Item1 { position[]={4744,0,10860}; name="respawn_east"; type="Empty"; };
+	};
+};
+class Intro { randomSeed=1; class Intel { }; };
+class OutroWin { randomSeed=2; class Intel { }; };
+class OutroLoose { randomSeed=3; class Intel { }; };

@@ -596,3 +596,35 @@ raised to half the total per side with endless supplies, and 12 frame-profiler s
 The simulation stage stays far inside a 60 fps frame at 150 soldiers. The 240 run never got past 156 alive within
 8 minutes (the AI buys one squad per plan and losses keep pace), so the 240 point is still open: it needs a faster
 fill (a scripted spawn) rather than the war's own purchasing.
+
+## Status, 2026-10-26 (afternoon): multiplayer, minimap, arsenals
+
+- **Multiplayer (server-authoritative, `ConquestRefereeNet.inc`).** The server (dedicated or hosting) runs the war;
+  once a second it publishes it as `conquestNet` (publicVariable: objectives, pools, scores, squads as group
+  references, each side's known contacts, HQ's radio lines, the log) and every client rebuilds its referee from it,
+  so the HUD, the commander view, markers and shroud work unchanged. A client's commander actions go to the server
+  as `[player, kind, args] remoteExec ["conquestRequest", 2]` (order, buy, barrage, hold command) and the server acts
+  for the asking unit's side. Players' slot groups are adopted as squads and get HQ's orders. No body swapping in
+  multiplayer: death is the mission's respawn (`respawn = "BASE"` at `respawn_west` / `respawn_east`). Mortar rounds
+  are network objects (`NetworkManager::CreateVehicle`, VLTFast), so every machine sees them and only the server
+  deals their damage. The mission: `MPMissions/conquest-everon-mp.Eden` (8 slots a side), sharing the war through a
+  copy of `conquest.hpp` that `Build-Conquest.ps1` checks against the single-player one.
+  - Verified on a real dedicated server (`tests/integration/multiplayer/conquest_dedicated.test`, retail data): the
+    war starts, the player's slot joins as a squad and gets HQ's order, the client mirrors the server's war (its
+    status line matches the server's). **Not verified end to end:** the client's requests. Since d164ad3bd
+    (2026-10-07) the developer harness rejects every command in multiplayer, so no Trident MP scenario can drive a
+    client past its briefing; the stock `dedicated_init_order_probe` fails the same way here. The scenario needs
+    that guard to have a test opt-in; `POSEIDON_CONQUEST_NETTEST=1` makes a client send a command and an order once
+    it is in the game, for a by-hand check from the two logs.
+- **Commander view, less clutter:** DEPLOY/SUPPORT opens with B or the top bar's button; compact squad rows with the
+  task on the selected one; the controls row behind H; callsigns over the 3D squads only for the selected and
+  hovered ones; one capture circle per objective. **Minimap** (World in Conflict style, bottom left): the island,
+  objectives, your squads, known enemies, the shroud and the camera's footprint; click or drag to move the view,
+  right click to send the selected squads.
+- **Follow camera:** follows the unit where it is drawn (between ticks) and pins the camera's own interpolation; the
+  followed truck's frame-to-frame jump on screen fell from a median 1.09 px (p90 3.35) to 0.22 px (p90 0.89).
+  A one-frame lag remains (the camera is placed after the scene is drawn).
+- **Also:** voice confirmations for the commander's orders (the leader's own radio voice), Ctrl + middle drag pans,
+  a free troop transport at every captured base, and an **arsenal** (the owner's `ReammoBox*`) at every owned
+  post, restocked every 10 minutes; the inventory's vicinity pane takes gear from it (in multiplayer the classic
+  Gear screen, as the physical inventory is single-player only).

@@ -43,6 +43,7 @@
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -187,6 +188,10 @@ struct State
     bool dragPan = false;    // Ctrl + left drag moves the view
     bool targeting = false;  // the next left click places the mortar barrage
     bool optionsOpen = false;
+    bool deployOpen = false; // the DEPLOY / SUPPORT panel (B, or the top bar's Deploy)
+    bool helpOpen = false;   // the controls row (H)
+    std::vector<ImU32> miniColours; // the minimap's ground, MiniCells x MiniCells, north up
+    int miniCells = 0;
     bool setupGrab = false;  // the setup screen freed the mouse
     std::string setupStart = "soldier";
     bool boxDrag = false;
@@ -303,6 +308,14 @@ float WorldSize()
 
 // ---- the camera ----
 
+// POSEIDON_CONQUEST_FOLLOW_TICKS=1: follow by tick position and let the camera be interpolated, as
+// before 2026-10-26 (the A/B for the follow camera's smoothness; see FollowTrace).
+bool FollowByTicks()
+{
+    static const bool on = std::getenv("POSEIDON_CONQUEST_FOLLOW_TICKS") != nullptr;
+    return on;
+}
+
 // What the camera follows, alive and still worth following.
 EntityAI* Followed()
 {
@@ -326,7 +339,9 @@ void ApplyCamera()
     float focusHeight = 0.0f;
     if (EntityAI* target = Followed())
     {
-        const Vector3 p = target->Position();
+        // Where it is DRAWN this frame (between simulation ticks), not its tick position: a driving
+        // car followed by its tick position steps 60 times a second and judders against the scene.
+        const Vector3 p = FollowByTicks() ? target->Position() : target->RenderWorldTransform().Position();
         s.focusX = p.X();
         s.focusY = p.Z();
         // Men are looked at chest-high, vehicles a little above their centre.
@@ -348,6 +363,21 @@ void ApplyCamera()
     cam->SetPosition(pos);
     cam->SetDirectionAndUp((focus - pos).Normalized(), VUp);
     cam->ResetTargets();
+    // The camera is placed every rendered frame: drawing must not blend it with where it stood at
+    // the last tick (REN-INTERP-001 interpolates every object between ticks).
+    if (!FollowByTicks())
+        cam->CaptureRenderPrev();
+}
+
+// POSEIDON_CONQUEST_FOLLOW_TRACE=1: where the followed unit is drawn on screen, once per frame. A
+// smooth follow keeps it still; judder shows as frame-to-frame jumps.
+void FollowTrace()
+{
+    static const bool on = std::getenv("POSEIDON_CONQUEST_FOLLOW_TRACE") != nullptr;
+    EntityAI* target = on ? Followed() : nullptr;
+    ScreenPoint p;
+    if (target && Project(target->RenderWorldTransform().Position(), p))
+        LOG_INFO(Mission, "Conquest follow trace: {:.2f} {:.2f} speed {:.1f}", p.x, p.y, target->Speed().Size());
 }
 
 void FocusOn(float x, float y)
@@ -906,8 +936,7 @@ void DrawObjectives(ImDrawList* draw)
     {
         const ObjectiveDef& d = snap.war.defs[o];
         const ObjectiveState& st = snap.war.states[o];
-        // The town, faint; the command post's small capture circle, strong: only soldiers inside it count.
-        ring(d, d.radius, SideColour(st.owner, 0.3f), 1.5f, true);
+        // The command post's small capture circle: only soldiers inside it count.
         ring(d, d.captureRadius, SideColour(st.owner, st.contested ? 0.6f : 0.95f), 3.0f, false);
         ScreenPoint c;
         if (!Project(Vector3(d.x, Ground(d.x, d.y) + 14.0f, d.y), c))
@@ -965,6 +994,11 @@ void DrawSquads(ImDrawList* draw, const std::vector<SquadDraw>& squads)
             DrawSymbol(draw, ImVec2(d.members[i].x, d.members[i].y), 7.0f, Arm::Infantry, false, colour, alpha,
                        sel && (!picked || d.soldiers[i] == picked));
         if (!d.leaderVisible)
+            continue;
+        // A callsign only where it helps: the selected squads, and the one under the pointer.
+        const ImVec2 mouse = ImGui::GetIO().MousePos;
+        const bool hovered = std::hypot(mouse.x - d.leader.x, mouse.y - d.leader.y) < 36.0f;
+        if (!sel && !hovered)
             continue;
         const std::string name = CallsignFull(d.group.id) + "  " + std::to_string(d.men);
         const ImVec2 at(d.leader.x, d.leader.y - 24.0f);
@@ -1178,6 +1212,9 @@ void DrawTopBar(const Snapshot& snap)
         ImGui::SameLine(0.0f, 22.0f);
         ImGui::BeginGroup();
         Label(Font().body, 12.0f, ColMuted, " ");
+        if (ImGui::Button(St().deployOpen ? "Close deploy" : "Deploy  B"))
+            St().deployOpen = !St().deployOpen;
+        ImGui::SameLine(0.0f, 8.0f);
         if (ImGui::Button(St().optionsOpen ? "Close options" : "Options"))
             St().optionsOpen = !St().optionsOpen;
         ImGui::EndGroup();
@@ -1355,6 +1392,16 @@ void DrawSoldierHud(const Snapshot& snap)
             const ImVec2 ba(a.x + 18.0f, a.y + 44.0f), bb(b.x - 18.0f, a.y + 52.0f);
             draw->AddRectFilled(ba, bb, IM_COL32(255, 255, 255, 30), 4.0f);
             draw->AddRectFilled(ba, ImVec2(ba.x + (bb.x - ba.x) * st.level, bb.y), SideColour(st.holder), 4.0f);
+            if (st.owner == me && st.holder == me && st.level >= 1.0f)
+            {
+                // The post's arsenal box (ConquestReferee UpdateArsenals): the inventory restocks from it.
+                const char* hint = GWorld && GWorld->GetMode() == GModeNetware ? "Arsenal here: use the box's Gear action to restock"
+                                                                                : "Arsenal here: open your inventory to restock";
+                const ImVec2 t = Measure(f.body, 13.0f, hint);
+                const ImVec2 ha(io.DisplaySize.x * 0.5f - t.x * 0.5f - 14.0f, b.y + 6.0f);
+                draw->AddRectFilled(ha, ImVec2(ha.x + t.x + 28.0f, ha.y + 26.0f), WithAlpha(ColPanel, 0.8f), 13.0f);
+                Put(draw, f.body, 13.0f, ImVec2(ha.x + 14.0f, ha.y + 13.0f - t.y * 0.5f), ColGood, hint);
+            }
             break;
         }
     }
@@ -1392,73 +1439,89 @@ void DrawToast()
         s.status.c_str());
 }
 
+Arm ArmOfRole(const std::string& role)
+{
+    if (role == "motorised" || role == "recon")
+        return Arm::Motorised;
+    if (role == "mechanised")
+        return Arm::Mechanised;
+    if (role == "armour")
+        return Arm::Armour;
+    if (role == "air" || role == "gunship")
+        return Arm::Rotary;
+    return Arm::Infantry;
+}
+
 void DrawSquadList(const Snapshot& snap, const std::vector<SquadDraw>& squads)
 {
     const ImGuiIO& io = ImGui::GetIO();
+    // Above the minimap, never over it.
     if (BeginPanel("##conquest_squads", ImVec2(14.0f, 96.0f), ImVec2(0.0f, 0.0f),
-                   ImVec2(330.0f, io.DisplaySize.y - 220.0f)))
+                   ImVec2(260.0f, std::max(120.0f, io.DisplaySize.y - 96.0f - 262.0f))))
     {
         char count[32];
         std::snprintf(count, sizeof(count), "%d", static_cast<int>(squads.size()));
         Heading("SQUADS", count);
-        ImGui::Spacing();
-        const float width = 296.0f;
+        const float width = 228.0f;
         for (const SquadDraw& d : squads)
         {
             ImGui::PushID(d.group.id);
             const bool sel = IsSelected(d.group.id);
+            const float h = sel ? 46.0f : 28.0f;
             const ImVec2 at = ImGui::GetCursorScreenPos();
-            if (ImGui::InvisibleButton("card", ImVec2(width, 56.0f)))
+            if (ImGui::InvisibleButton("card", ImVec2(width, h)))
             {
                 if (io.KeyShift || io.KeyCtrl)
                     ToggleSelected(d.group.id);
                 else
                     St().selected = {d.group.id};
+                St().unit = nullptr;
             }
             const bool hovered = ImGui::IsItemHovered();
             if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
                 FocusOn(d.worldX, d.worldY);
             ImDrawList* draw = ImGui::GetWindowDrawList();
-            const ImVec2 b(at.x + width, at.y + 56.0f);
-            draw->AddRectFilled(at, b, sel ? WithAlpha(ColSelect, 0.16f) : hovered ? ColCardHover : ColCard, 10.0f);
+            const ImVec2 b(at.x + width, at.y + h);
+            const ImU32 shade = SquadShade(d.group.side, d.group.id);
+            draw->AddRectFilled(at, b, sel ? WithAlpha(ColSelect, 0.16f) : hovered ? ColCardHover : ColCard, 7.0f);
             if (sel)
-                draw->AddRect(at, b, WithAlpha(ColSelect, 0.8f), 10.0f, 0, 1.5f);
-            draw->AddRectFilled(ImVec2(at.x, at.y + 8.0f), ImVec2(at.x + 4.0f, b.y - 8.0f), SquadShade(d.group.side, d.group.id), 2.0f);
-
+                draw->AddRect(at, b, WithAlpha(ColSelect, 0.8f), 7.0f, 0, 1.2f);
+            DrawSymbol(draw, ImVec2(at.x + 16.0f, at.y + 20.0f), 8.0f, ArmOfRole(d.group.role), false, shade, 1.0f, false);
             const std::string name = CallsignFull(d.group.id);
-            Put(draw, Font().bold, 16.0f, ImVec2(at.x + 16.0f, at.y + 7.0f), ColText, name.c_str());
-            const std::string type = d.group.typeName.empty() ? std::string("Squad") : d.group.typeName;
-            const float tw = Measure(Font().body, 13.0f, type.c_str()).x;
-            Put(draw, Font().body, 13.0f, ImVec2(b.x - tw - 12.0f, at.y + 9.0f), ColMuted, type.c_str());
-
-            std::string buffer;
-            const char* task = Task(d.group, snap, buffer);
-            const ImU32 taskColour = d.group.stalled ? ColWarn : d.group.playerLed ? ColSelect
-                                                             : d.group.task == TaskKind::None ? ColMuted
-                                                                                               : ColText;
-            Put(draw, Font().body, 13.0f, ImVec2(at.x + 16.0f, at.y + 31.0f), taskColour, task);
-
+            Put(draw, Font().bold, 14.0f, ImVec2(at.x + 32.0f, at.y + 5.0f), ColText, name.c_str());
+            if (d.group.locked && !d.group.playerLed)
+            {
+                const float nx = at.x + 32.0f + Measure(Font().bold, 14.0f, name.c_str()).x + 6.0f;
+                draw->AddCircleFilled(ImVec2(nx + 3.0f, at.y + 14.0f), 3.0f, ColSelect); // under your orders
+            }
             // Strength: one pip per soldier the squad started with.
             const int size = std::max(d.group.size, d.men);
             for (int i = 0; i < size; i++)
             {
-                const ImVec2 p(b.x - 14.0f - static_cast<float>(size - 1 - i) * 9.0f, at.y + 39.0f);
+                const ImVec2 pt(b.x - 10.0f - static_cast<float>(size - 1 - i) * 7.0f, at.y + 14.0f);
                 if (i < d.men)
-                    draw->AddCircleFilled(p, 3.2f, SideColour(d.group.side));
+                    draw->AddCircleFilled(pt, 2.5f, shade);
                 else
-                    draw->AddCircle(p, 3.2f, IM_COL32(255, 255, 255, 60), 10, 1.0f);
+                    draw->AddCircle(pt, 2.5f, IM_COL32(255, 255, 255, 60), 10, 1.0f);
             }
-            if (d.group.locked && !d.group.playerLed)
+            if (sel)
             {
-                const ImVec2 t = Measure(Font().bold, 11.0f, "YOUR ORDERS");
-                const ImVec2 pa(b.x - tw - t.x - 34.0f, at.y + 9.0f);
-                draw->AddRectFilled(pa, ImVec2(pa.x + t.x + 12.0f, pa.y + t.y + 4.0f), WithAlpha(ColSelect, 0.22f), 6.0f);
-                Put(draw, Font().bold, 11.0f, ImVec2(pa.x + 6.0f, pa.y + 2.0f), ColSelect, "YOUR ORDERS");
+                std::string buffer;
+                const char* task = Task(d.group, snap, buffer);
+                Put(draw, Font().body, 12.5f, ImVec2(at.x + 32.0f, at.y + 26.0f),
+                    d.group.stalled ? ColWarn : d.group.playerLed ? ColSelect : ColMuted, task);
+            }
+            else if (hovered)
+            {
+                std::string buffer;
+                ImGui::BeginTooltip();
+                ImGui::TextUnformatted((d.group.typeName + "  -  " + Task(d.group, snap, buffer)).c_str());
+                ImGui::EndTooltip();
             }
             ImGui::PopID();
         }
         if (squads.empty())
-            Label(Font().body, 14.0f, ColMuted, "No squads. Deploy some on the right.");
+            Label(Font().body, 13.0f, ColMuted, "No squads. Press B to deploy.");
     }
     ImGui::End();
 }
@@ -1479,6 +1542,8 @@ void DrawDeploy(const Snapshot& snap)
     const ImGuiIO& io = ImGui::GetIO();
     const int me = PlayerSide();
     State& s = St();
+    if (!s.deployOpen)
+        return;
     if (s.deployBase < 0 || s.deployBase >= static_cast<int>(snap.war.defs.size()) || snap.war.states[s.deployBase].owner != me)
         s.deployBase = HomeBase();
     if (BeginPanel("##conquest_deploy", ImVec2(io.DisplaySize.x - 14.0f, 96.0f), ImVec2(1.0f, 0.0f),
@@ -1563,7 +1628,9 @@ void DrawDeploy(const Snapshot& snap)
             {
                 std::string refused;
                 const int id = BuySquad(s.deployBase, static_cast<int>(t), &refused);
-                if (id)
+                if (id < 0) // multiplayer: asked of the server, which answers on the radio
+                    SetStatus(types[t].name + " requested at " + snap.war.defs[s.deployBase].name + ".");
+                else if (id)
                 {
                     St().selected = {id};
                     SetStatus(types[t].name + " deployed at " + snap.war.defs[s.deployBase].name + "  -  " +
@@ -1760,7 +1827,7 @@ void DrawCommandBar(const std::vector<SquadDraw>& squads)
 {
     const ImGuiIO& io = ImGui::GetIO();
     State& s = St();
-    if (BeginPanel("##conquest_bar", ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y - 14.0f), ImVec2(0.5f, 1.0f)))
+    if (BeginPanel("##conquest_bar", ImVec2(io.DisplaySize.x * 0.5f + 120.0f, io.DisplaySize.y - 14.0f), ImVec2(0.5f, 1.0f)))
     {
         if (!s.selected.empty())
         {
@@ -1769,38 +1836,191 @@ void DrawCommandBar(const std::vector<SquadDraw>& squads)
                 names += (i ? ", " : "") + CallsignFull(s.selected[i]);
             if (s.selected.size() > 4)
                 names += " and " + std::to_string(s.selected.size() - 4) + " more";
-            Label(Font().bold, 16.0f, ColSelect, names.c_str());
-            ImGui::SameLine(0.0f, 18.0f);
-            Label(Font().body, 14.0f, ColMuted, "Right click an objective, an enemy or the ground to give orders.");
+            Label(Font().bold, 15.0f, ColSelect, names.c_str());
+            ImGui::SameLine(0.0f, 14.0f);
+            Label(Font().body, 13.0f, ColMuted, "Right click to order");
             if (PossessionAllowed())
             {
-                ImGui::SameLine(0.0f, 18.0f);
-                if (ImGui::Button(s.unit ? "Take control of this soldier" : "Take control of the leader"))
+                ImGui::SameLine(0.0f, 14.0f);
+                if (ImGui::Button(s.unit ? "Take control  T" : "Lead squad  T"))
                     TakeControl();
             }
-            ImGui::SameLine(0.0f, 8.0f);
+            ImGui::SameLine(0.0f, 6.0f);
             if (ImGui::Button("Deselect"))
+            {
                 s.selected.clear();
+                s.unit = nullptr;
+            }
         }
         else
-            Label(Font().body, 14.0f, ColMuted, "Click a squad to select it, or drag a box around several.");
-        ImDrawList* draw = ImGui::GetWindowDrawList();
-        KeyCap(draw, "LMB", "Select");
-        ImGui::SameLine(0.0f, 16.0f);
-        KeyCap(draw, "RMB", "Order");
-        ImGui::SameLine(0.0f, 16.0f);
-        KeyCap(draw, "WASD / Ctrl+drag", "Move view");
-        ImGui::SameLine(0.0f, 16.0f);
-        KeyCap(draw, "Wheel", "Zoom");
-        ImGui::SameLine(0.0f, 16.0f);
-        KeyCap(draw, "Q E", "Turn");
-        ImGui::SameLine(0.0f, 16.0f);
-        KeyCap(draw, "R F", "Tilt");
-        ImGui::SameLine(0.0f, 16.0f);
-        KeyCap(draw, "Ctrl M", PossessionAllowed() ? "Leave command / back to command" : "Leave command");
+            Label(Font().body, 13.0f, ColMuted, "Click a squad, or drag a box.   H  controls");
+        if (s.helpOpen)
+        {
+            ImDrawList* draw = ImGui::GetWindowDrawList();
+            KeyCap(draw, "LMB", "Select");
+            ImGui::SameLine(0.0f, 12.0f);
+            KeyCap(draw, "RMB", "Order");
+            ImGui::SameLine(0.0f, 12.0f);
+            KeyCap(draw, "WASD / Ctrl+drag", "Move");
+            ImGui::SameLine(0.0f, 12.0f);
+            KeyCap(draw, "Wheel", "Zoom");
+            ImGui::SameLine(0.0f, 12.0f);
+            KeyCap(draw, "Q E / R F", "Turn / tilt");
+            ImGui::SameLine(0.0f, 12.0f);
+            KeyCap(draw, "B", "Deploy");
+            ImGui::SameLine(0.0f, 12.0f);
+            KeyCap(draw, "Ctrl M", "Leave");
+        }
     }
     ImGui::End();
     (void)squads;
+}
+
+// The minimap (bottom left, as in World in Conflict): the whole island north up, its objectives,
+// your squads, the enemy you know of and what the camera sees. Left click or drag moves the view
+// there; right click sends the selected squads.
+constexpr int MiniCells = 72;
+constexpr float MiniSize = 230.0f;
+
+void PrepareMinimap()
+{
+    State& s = St();
+    if (s.miniCells == MiniCells || !GLandscape)
+        return;
+    s.miniCells = MiniCells;
+    s.miniColours.assign(static_cast<size_t>(MiniCells) * MiniCells, 0);
+    const float size = WorldSize(), cell = size / static_cast<float>(MiniCells);
+    for (int j = 0; j < MiniCells; j++)
+        for (int i = 0; i < MiniCells; i++)
+        {
+            const float x = (static_cast<float>(i) + 0.5f) * cell, y = (static_cast<float>(j) + 0.5f) * cell;
+            const float h = GLandscape->SurfaceY(x, y) - GLandscape->GetSeaLevel();
+            const float slope = std::clamp((GLandscape->SurfaceY(x + cell * 0.5f, y) - GLandscape->SurfaceY(x - cell * 0.5f, y)) /
+                                               (cell * 0.3f),
+                                           -1.0f, 1.0f);
+            ImU32 c;
+            if (h < 0.0f)
+            {
+                const float deep = std::clamp(-h / 40.0f, 0.0f, 1.0f);
+                c = IM_COL32(static_cast<int>(36 - 18 * deep), static_cast<int>(70 - 30 * deep), static_cast<int>(104 - 30 * deep), 255);
+            }
+            else
+            {
+                const float t = std::clamp(h / 220.0f, 0.0f, 1.0f), light = 1.0f + 0.25f * slope;
+                const auto mix = [&](float a, float b) { return static_cast<int>(std::clamp((a + (b - a) * t) * light, 0.0f, 255.0f)); };
+                c = IM_COL32(mix(58, 132), mix(82, 120), mix(52, 92), 255);
+            }
+            s.miniColours[static_cast<size_t>(MiniCells - 1 - j) * MiniCells + i] = c; // north up
+        }
+}
+
+void DrawMinimap(const Snapshot& snap, const std::vector<SquadDraw>& squads)
+{
+    State& s = St();
+    PrepareMinimap();
+    if (s.miniCells == 0)
+        return;
+    const ImGuiIO& io = ImGui::GetIO();
+    const float size = WorldSize();
+    if (!BeginPanel("##conquest_minimap", ImVec2(14.0f, io.DisplaySize.y - 14.0f), ImVec2(0.0f, 1.0f)))
+    {
+        ImGui::End();
+        return;
+    }
+    const ImVec2 at = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton("map", ImVec2(MiniSize, MiniSize), ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+    const auto toMap = [&](float x, float y) { return ImVec2(at.x + x / size * MiniSize, at.y + (1.0f - y / size) * MiniSize); };
+    const auto toWorld = [&](ImVec2 m, float& x, float& y)
+    {
+        x = std::clamp((m.x - at.x) / MiniSize, 0.0f, 1.0f) * size;
+        y = std::clamp(1.0f - (m.y - at.y) / MiniSize, 0.0f, 1.0f) * size;
+    };
+    if (ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Left))
+    {
+        float x, y;
+        toWorld(io.MousePos, x, y);
+        FocusOn(x, y);
+    }
+    if (ImGui::IsItemClicked(ImGuiMouseButton_Right) && !s.selected.empty())
+    {
+        float x, y;
+        toWorld(io.MousePos, x, y);
+        if (const int n = OrderGroups(s.selected, x, y))
+        {
+            s.flashes.push_back({x, y, SDL_GetTicks()});
+            SetStatus("Moving to the point on the map  -  " + std::to_string(n) + (n == 1 ? " squad" : " squads"));
+        }
+    }
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    const float cellPx = MiniSize / static_cast<float>(s.miniCells);
+    for (int j = 0; j < s.miniCells; j++)
+        for (int i = 0; i < s.miniCells; i++)
+        {
+            const ImVec2 a(at.x + i * cellPx, at.y + j * cellPx);
+            draw->AddRectFilled(a, ImVec2(a.x + cellPx + 0.5f, a.y + cellPx + 0.5f), s.miniColours[static_cast<size_t>(j) * s.miniCells + i]);
+        }
+    // Shroud: what nobody of yours has seen.
+    if (GetOptions().fog == FogMode::Shroud)
+    {
+        const float worldCell = size / static_cast<float>(s.miniCells);
+        for (int j = 0; j < s.miniCells; j++)
+            for (int i = 0; i < s.miniCells; i++)
+                if (!Explored((static_cast<float>(i) + 0.5f) * worldCell, size - (static_cast<float>(j) + 0.5f) * worldCell))
+                {
+                    const ImVec2 a(at.x + i * cellPx, at.y + j * cellPx);
+                    draw->AddRectFilled(a, ImVec2(a.x + cellPx + 0.5f, a.y + cellPx + 0.5f), IM_COL32(4, 6, 9, 235));
+                }
+    }
+    // What the camera looks at: the ground under the screen's corners.
+    {
+        ImVec2 corners[4];
+        int n = 0;
+        const ImVec2 screen[4] = {ImVec2(0.0f, io.DisplaySize.y * 0.12f), ImVec2(io.DisplaySize.x, io.DisplaySize.y * 0.12f),
+                                  ImVec2(io.DisplaySize.x, io.DisplaySize.y), ImVec2(0.0f, io.DisplaySize.y)};
+        for (const ImVec2& c : screen)
+        {
+            float x, y;
+            if (GroundAt(c.x, c.y, x, y))
+                corners[n++] = toMap(x, y);
+        }
+        if (n == 4)
+            draw->AddQuad(corners[0], corners[1], corners[2], corners[3], IM_COL32(255, 255, 255, 200), 1.2f);
+        else
+        {
+            const ImVec2 c = toMap(s.focusX, s.focusY);
+            draw->AddCircle(c, 6.0f, IM_COL32(255, 255, 255, 200), 12, 1.2f);
+        }
+    }
+    for (size_t o = 0; o < snap.war.defs.size(); o++)
+    {
+        const ObjectiveDef& d = snap.war.defs[o];
+        const ObjectiveState& st = snap.war.states[o];
+        const ImVec2 c = toMap(d.x, d.y);
+        const float r = d.kind == ObjectiveKind::HQ ? 6.0f : 4.5f;
+        draw->AddCircleFilled(c, r, SideColour(st.owner, 0.95f));
+        draw->AddCircle(c, r + 1.5f, st.contested ? ColWarn : IM_COL32(255, 255, 255, 180), 16, 1.2f);
+    }
+    const int me = PlayerSide();
+    int enemy = NoSide;
+    for (int side = 0; side < snap.war.sideCount; side++)
+        if (side != me)
+            enemy = side;
+    for (const Contact& c : KnownEnemies(me))
+    {
+        const ImVec2 p = toMap(c.x, c.y);
+        draw->AddRectFilled(ImVec2(p.x - 1.5f, p.y - 1.5f), ImVec2(p.x + 1.5f, p.y + 1.5f),
+                            SideColour(enemy, 1.0f - std::clamp(c.age / 120.0f, 0.0f, 0.7f)));
+    }
+    for (const SquadDraw& d : squads)
+    {
+        const ImVec2 p = toMap(d.worldX, d.worldY);
+        const bool sel = IsSelected(d.group.id);
+        draw->AddCircleFilled(p, sel ? 3.2f : 2.4f, SquadShade(d.group.side, d.group.id));
+        if (sel)
+            draw->AddCircle(p, 5.0f, ColSelect, 12, 1.2f);
+    }
+    draw->AddRect(at, ImVec2(at.x + MiniSize, at.y + MiniSize), ColEdge, 0.0f, 0, 1.0f);
+    ImGui::End();
 }
 } // namespace
 
@@ -1930,6 +2150,10 @@ bool ProcessEvent(const SDL_Event& event)
             if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.scancode == SDL_SCANCODE_T &&
                 PossessionAllowed() && !s.selected.empty())
                 TakeControl();
+            if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.scancode == SDL_SCANCODE_B)
+                s.deployOpen = !s.deployOpen;
+            if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.scancode == SDL_SCANCODE_H)
+                s.helpOpen = !s.helpOpen;
             s.consumeKeyboard = true;
             return true;
         case SDL_EVENT_MOUSE_MOTION:
@@ -1977,7 +2201,13 @@ bool ProcessEvent(const SDL_Event& event)
                 }
             }
             else if (event.button.button == SDL_BUTTON_MIDDLE)
-                s.rotating = true;
+            {
+                // Ctrl + middle drag moves the view like Ctrl + left drag; the middle button alone turns and tilts it.
+                if ((SDL_GetModState() & SDL_KMOD_CTRL) != 0)
+                    s.dragPan = true;
+                else
+                    s.rotating = true;
+            }
             else if (event.button.button == SDL_BUTTON_RIGHT)
             {
                 if (s.targeting)
@@ -2003,7 +2233,10 @@ bool ProcessEvent(const SDL_Event& event)
                 s.boxDrag = false;
             }
             else if (event.button.button == SDL_BUTTON_MIDDLE)
+            {
                 s.rotating = false;
+                s.dragPan = false;
+            }
             return true;
         default:
             break;
@@ -2108,6 +2341,7 @@ void Frame()
     if (!MenuOpen())
         Pan(dt);
     ApplyCamera();
+    FollowTrace();
 
     // Forget squads (and a picked soldier) that no longer exist.
     std::vector<SquadDraw> squads = CollectSquads();
@@ -2138,6 +2372,7 @@ void Frame()
     DrawSquadList(snap, squads);
     DrawDeploy(snap);
     DrawCommandBar(squads);
+    DrawMinimap(snap, squads);
     DrawOptions();
     DrawToast();
     PopTheme();
