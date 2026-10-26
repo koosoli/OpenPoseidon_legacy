@@ -319,7 +319,7 @@ struct TwSurface {
     // (OP) blood in the water: per stain x, z, age, amount (impacts.rs blood_lanes, tw_impact.wgsl)
     blood: [[f32; 4]; impacts::BLOOD_SLOTS],
     // (OP) x: sun glitter on (SEA-GLINTS; the Water tab's switch rides in WgrWaterParams::water_backend_pad[0],
-    // 1 = off, so a zero-filled producer keeps the default)
+    // bit 0 = off, so a zero-filled producer keeps the default), y: SEA-HYDRO (bit 1 = off), z: SEA-SMEAR (bit 2 = off)
     look: [f32; 4],
 }
 
@@ -496,7 +496,12 @@ fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
         rotor_sources: f.rotor.sources,
         hulls: hull_mask_lanes(p),
         blood: f.blood,
-        look: [if p.water_backend_pad[0] & 1 != 0 { 0.0 } else { 1.0 }, 0.0, 0.0, 0.0],
+        look: [
+            if p.water_backend_pad[0] & 1 != 0 { 0.0 } else { 1.0 },
+            if p.water_backend_pad[0] & 2 != 0 { 0.0 } else { 1.0 },
+            if p.water_backend_pad[0] & 4 != 0 { 0.0 } else { 1.0 },
+            0.0,
+        ],
     }
 }
 
@@ -1995,9 +2000,9 @@ mod tests {
     /// variant and WHOLE_WORLD: every combination composes and validates.
     #[test]
     fn tidewater_water_shader_composes_with_look_pack() {
-        for mask in 0u32..32 {
+        for mask in 0u32..128 {
             let mut defs = std::collections::HashMap::new();
-            for (bit, def) in ["SEA_GLINTS", "TW_FOAM2", "SEA_RAIN", "WHOLE_WORLD", "SEA_SPECAA"].iter().enumerate() {
+            for (bit, def) in ["SEA_GLINTS", "TW_FOAM2", "SEA_RAIN", "WHOLE_WORLD", "SEA_SPECAA", "SEA_HYDRO", "SEA_SMEAR"].iter().enumerate() {
                 if mask & (1 << bit) != 0 {
                     defs.insert(def.to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
                 }

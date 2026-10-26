@@ -514,7 +514,7 @@ fn laceExpected(c: f32) -> f32 {
     return mix(g[i], g[i + 1u], x - f32(i));
 }
 
-fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam: f32, shoreN: vec3<f32>, shoreFoam: f32, extraFoam: f32, surfMask: vec2<f32>, simIn: f32, sf: SurfFoamCtx) -> WaterSurfaceFrag {
+fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, waveH: f32, vertexFoam: f32, shoreN: vec3<f32>, shoreFoam: f32, extraFoam: f32, surfMask: vec2<f32>, simIn: f32, sf: SurfFoamCtx) -> WaterSurfaceFrag {
     var d = vec4<f32>(0.0);
     var foamSum = 0.0;
     // the clear concave face of a plunging wave overhangs the trough: the foam carried by the
@@ -527,6 +527,26 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
     var aeration = 0.0;
 
     let det = seaDetailSample(lagXZ, footprint);
+#ifdef SEA_HYDRO
+    // (OP, SEA-HYDRO) hydrodynamic modulation (open-water's water.js, MIT): short waves steepen on the
+    // crests of the long waves and on their downwind faces, and the troughs stay glassy. The long
+    // cascades are fetched first; their slope against the wind finds the face, the vertex wave height
+    // against the wind sea's significant height (Pierson-Moskowitz, 0.0214 U^2) finds the crest, and the
+    // short cascades and the unresolved roughness are scaled 0.8-1.25 by both. The same taps as without.
+    let hsW = max(0.0214 * tw.sea.z * tw.sea.z * tw.surface.x, 0.1);
+    let crestM = smoothstep(-0.3 * hsW, 0.3 * hsW, waveH);
+    let dL0 = textureSample(oceanDerivatives, smpAniso4Repeat, lagXZ / ocean.sizes[0].x, 0) * waterSurfaceCascadeAttenuation(0, depth);
+    let dL1 = textureSample(oceanDerivatives, smpAniso4Repeat, lagXZ / ocean.sizes[1].x, 1) * waterSurfaceCascadeAttenuation(1, depth);
+    let sLong = (dL0.xy + dL1.xy) * tw.surface.x;
+    let faceM = smoothstep(0.0, 1.0, -dot(sLong, tw.wind.xy) / 0.08);
+    // (the Water tab's "TW crest bunching", tw.look.y, scales it in)
+    let hydro = mix(1.0, mix(0.8, 1.25, sat(0.6 * crestM + 0.4 * faceM)), tw.look.y);
+    let rough = det.rough * hydro;
+    d = dL0 + dL1 * mix(1.0, rough, 0.4);
+    for (var c = 2; c < CASCADES; c++) {
+        d += textureSample(oceanDerivatives, smpAniso4Repeat, lagXZ / ocean.sizes[c].x, c) * (waterSurfaceCascadeAttenuation(c, depth) * rough);
+    }
+#else
     let rough = det.rough;
 
     for (var c = 0; c < CASCADES; c++) {
@@ -535,6 +555,7 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
         else if (c == CASCADES - 3) { att *= mix(1.0, rough, 0.4); }
         d += textureSample(oceanDerivatives, smpAniso4Repeat, lagXZ / ocean.sizes[c].x, c) * att;
     }
+#endif
     d *= tw.surface.x;
     var slopes = vec2<f32>(d.x / max(d.z + 1.0, 0.2), d.y / max(d.w + 1.0, 0.2));
 
@@ -636,6 +657,28 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
     var whitecaps = mix(vertexFoam, activeFoam, activeNear) + fresh;
 #else
     var whitecaps = vertexFoam + fresh;
+#endif
+#ifdef SEA_SMEAR
+    // (OP, SEA-SMEAR) downwind froth smear (open-water's water.js, MIT): a crest moves downwind, so a
+    // point carries the froth of the crests now 1.5, 3 and 5 m downwind of it, and a cap trails its froth
+    // instead of reading as painted on the crest. The foam field of the two whitecap cascades (the
+    // vertex foam's own source, twDisplace), near the eye only (beyond 1 m pixels the trail is under a
+    // pixel): six taps there.
+    // (the Water tab's "TW froth smear", tw.look.z)
+    let smearNear = (1.0 - smoothstep(0.5, 1.0, footprint)) * tw.look.z;
+    if (smearNear > 0.0) {
+        var trail = 0.0;
+        let offs = array<vec2<f32>, 3>(vec2<f32>(1.5, 0.8), vec2<f32>(3.0, 0.55), vec2<f32>(5.0, 0.3));
+        for (var k = 0; k < 3; k++) {
+            let q = lagXZ + tw.wind.xy * offs[k].x;
+            let f = textureSampleLevel(oceanDisplacement, smpLinearRepeat, q / ocean.sizes[1].x, 1, 1.5).w * 0.45
+                + textureSampleLevel(oceanDisplacement, smpLinearRepeat, q / ocean.sizes[2].x, 2, 1.5).w * 0.5;
+            trail += f * offs[k].y;
+        }
+        // the two cascades carry ~0.95 of the 1.55 the vertex foam sums (twDisplace foamWeights)
+        trail *= 1.55 / 0.95;
+        whitecaps = mix(whitecaps, max(whitecaps, (whitecaps + trail) / 1.8), smearNear);
+    }
 #endif
     whitecaps = whitecaps * mix(0.5, 1.5, det.gust);
     var capCover = whitecaps * tw.surface.z;
@@ -992,7 +1035,7 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
     // lace (holes, strands) rather than as fresh whitewater: as whitewater it was an even, opaque
     // white rope with detached blobs along the beach
     let edgeLace = 0.75 * simIn;
-    let surf = waterSurfaceFragment(lagXZ, footprint, vDepth, in.foam, in.shoreN, in.shoreFoam + edgeFoam * (1.0 - edgeLace), simState.x + edgeFoam * edgeLace, in.surfMask, simIn, sfCtx);
+    let surf = waterSurfaceFragment(lagXZ, footprint, vDepth, in.waveH, in.foam, in.shoreN, in.shoreFoam + edgeFoam * (1.0 - edgeLace), simState.x + edgeFoam * edgeLace, in.surfMask, simIn, sfCtx);
     let foam = surf.foam;
     // the gradients the SurfFoam lighting differentiates, in uniform control flow (see tw_surf_foam.wgsl)
     let foamGrad = surfFoamGrad(surf.foamInfo, dwx, dwy);

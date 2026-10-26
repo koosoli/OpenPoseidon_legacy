@@ -6941,6 +6941,11 @@ void DrawWaterTab()
         changed |= Dev::Checkbox("TW sun glitter", &t.sunGlitter);
         Dev::PanelTooltip("The sun's sparkle on the sea: tiny facets on the water that mirror the sun, "
                           "along the glitter path and round it. On by default.");
+        changed |= Dev::Checkbox("TW crest bunching", &t.seaHydro);
+        Dev::PanelTooltip("Short ripples bunched on the wave crests and downwind faces, glassy troughs "
+                          "(open-water's hydrodynamic modulation). On by default; WGR_SEA_HYDRO=0 compiles it out.");
+        changed |= Dev::Checkbox("TW froth smear", &t.seaSmear);
+        Dev::PanelTooltip("Whitecaps trail their froth downwind (open-water). On by default; WGR_SEA_SMEAR=0 compiles it out.");
         changed |= Dev::SliderFloat("TW reflection strength", &t.reflectionStrength, 0.0f, 2.0f, "%.2f");
         changed |= Dev::SliderFloat("TW water glow", &t.waterGlow, 0.0f, 1.0f, "%.2f");
         Dev::PanelTooltip("Light scattered inside the water toward the eye (W3j). 0 = the surface's reflection "
