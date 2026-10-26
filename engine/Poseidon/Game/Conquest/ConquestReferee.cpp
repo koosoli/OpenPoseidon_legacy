@@ -872,15 +872,27 @@ Vector3 ParkingSlot(Referee& r, int side, int o, bool big)
     const ObjectiveDef& d = r.war.defs[o];
     // Dry land only: behind Morton is the beach, and a helicopter parked in the surf counts as unusable --
     // the AI then took it from its squad and could not board it. A slot below 3 m is skipped; with none
-    // left, the vehicle parks beside the base's spawn point as it used to.
-    for (int tries = 0; tries < 18; tries++)
+    // left, the vehicle parks beside the base's spawn point as it used to. A slot a vehicle still stands in is
+    // skipped too: the slots used to be handed out in turn, and once all were used a new truck appeared on top
+    // of one that had not left -- the soaks' stuck vehicles stood in Morton's parking rows, war after war.
+    const float clear = big ? 20.0f : 12.0f;
+    for (int tries = 0; tries < 30; tries++)
     {
-        const int slot = r.parked[o]++ % 18;
+        const int slot = r.parked[o]++ % 30;
         const int row = slot / 6, col = slot % 6;
         const float lateral = (col % 2 ? 1.0f : -1.0f) * (static_cast<float>(col / 2) + 0.5f) * (big ? 45.0f : 28.0f);
         const float back = d.radius * 0.6f + 30.0f + static_cast<float>(row) * 35.0f;
         const float x = d.x - fx * back + px * lateral, y = d.y - fy * back + py * lateral;
-        if (GLandscape && GLandscape->SurfaceY(x, y) >= 3.0f)
+        if (!GLandscape || GLandscape->SurfaceY(x, y) < 3.0f)
+            continue;
+        const bool taken = std::any_of(r.units.begin(), r.units.end(),
+                                       [&](const UnitRecord& u)
+                                       {
+                                           const EntityAI* v = u.unit;
+                                           return u.vehicle && v && !v->IsDammageDestroyed() &&
+                                                  std::hypot(v->Position().X() - x, v->Position().Z() - y) < clear;
+                                       });
+        if (!taken)
             return Ground(x, y);
     }
     const Vector3 at = SpawnPoint(r, side, o);

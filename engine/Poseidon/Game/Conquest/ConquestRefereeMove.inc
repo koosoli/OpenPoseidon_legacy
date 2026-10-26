@@ -120,9 +120,16 @@ void TrackFerry(Referee& r, GroupRecord& rec, float now)
         heli->LandStarted(Transport::LMLand);
         rec.landing = true;
     }
-    // Set down: its origin stands about 1.9 m over the ground (the feature test's "landed" reads 1.88).
+    // Set down: still, low, near home. Its origin stands over the ground by the model's own height (a UH-60
+    // 1.9 m, a Mi-17 4.4 m), so a helicopter that has not moved for 5 s under 8 m has landed.
     const float above = at.Y() - GLandscape->SurfaceYAboveWater(at.X(), at.Z());
-    if (rec.landing && above < 3.0f && heli->Speed().Size() < 1.5f)
+    const int hq = HqOf(r, rec.side);
+    const float toHq = hq >= 0 ? std::hypot(at.X() - r.war.defs[hq].x, at.Z() - r.war.defs[hq].y) : 1.0e9f;
+    // On the ground near home, landed by its order or on its own: the AI pilot set the Mi-17 down at the
+    // Airfield 200 m short of its slot and waited there for good (soak probe, 2026-10-26).
+    if (above >= 8.0f || heli->Speed().Size() >= 1.0f)
+        rec.bestAt = now; // moving: "still since" starts again
+    if ((rec.landing || std::min(toGo, toHq) < 500.0f) && now - rec.orderedAt > 10.0f && now - rec.bestAt > 5.0f)
     {
         float refund = 0.0f;
         if (rec.type >= 0 && rec.type < static_cast<int>(r.config.squads.size()))

@@ -23,6 +23,7 @@ param(
     [int]$PollSeconds = 30,
     [int]$ShotEveryPolls = 10,
     [int]$Seed = 0,
+    [string]$Probe = '',
     [switch]$CommanderTest,
     [switch]$Visible
 )
@@ -38,11 +39,13 @@ if (!$env:LOCK_OWNER) {
     if ($Visible) { $argv += '-Visible' }
     if ($CommanderTest) { $argv += '-CommanderTest' }
     $env:LOCK_OWNER = 'conquest soak'
+    $env:CONQUEST_SOAK_PROBE = $Probe # through the environment: the lock wrapper's command line mangles SQF
     try { & 'C:\Program Files\Git\bin\bash.exe' @argv; if ($LASTEXITCODE) { throw "Conquest soak exited $LASTEXITCODE" } }
     finally { Remove-Item Env:LOCK_OWNER }
     return
 }
 if (Get-Process OpenPoseidon -ErrorAction SilentlyContinue) { throw 'Game already running' }
+if (!$Probe -and $env:CONQUEST_SOAK_PROBE) { $Probe = $env:CONQUEST_SOAK_PROBE }
 $out = Join-Path $root ('build/conquest-runs/' + (Get-Date -Format yyyyMMdd-HHmmss))
 New-Item -ItemType Directory -Force $out | Out-Null
 if (!$Bin) { $Bin = Join-Path $root 'dist/x64-win-rwdi' }
@@ -143,7 +146,10 @@ try {
         if ($p.HasExited) { throw 'Game exited during the soak' }
         $state = Eval 'conquestState'
         $game = Eval 'time'
-        (@{ real = [Math]::Round(([DateTime]::UtcNow - $start).TotalSeconds); game = $game; state = $state } |
+        # -Probe: an SQF expression (or @file holding one) evaluated and recorded at each poll.
+        $probeCode = if ($Probe.StartsWith('@')) { (Get-Content $Probe.Substring(1) -Raw).Trim() } else { $Probe }
+        $probed = if ($probeCode) { Eval $probeCode } else { $null }
+        (@{ real = [Math]::Round(([DateTime]::UtcNow - $start).TotalSeconds); game = $game; state = $state; probe = $probed } |
             ConvertTo-Json -Compress) | Add-Content $jsonl
         Write-Output ("[{0,5:N0}s real, {1} game] {2}" -f ([DateTime]::UtcNow - $start).TotalSeconds, $game, $state)
         if ($poll % $ShotEveryPolls -eq 0) { Shot ('map-{0:D3}' -f $poll) }
