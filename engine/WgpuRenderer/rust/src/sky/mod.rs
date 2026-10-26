@@ -78,6 +78,26 @@ fn sky_wgsl_validates_with_cloud_ms() {
     }
 }
 
+// CLOUD-SHADE (default; WGR_CLOUD_SHADE=0 = off): darker bases validate with the deck, MS and WHOLE_WORLD in every mix.
+#[test]
+fn sky_wgsl_validates_with_cloud_shade() {
+    for mask in 0u32..8 {
+        let mut composer=crate::shaders::build_composer();
+        let mut defs=crate::shaders::shader_defs();
+        defs.insert("CLOUD_SHADE".to_string(),naga_oil::compose::ShaderDefValue::Bool(true));
+        if mask & 1 == 0 { defs.remove("CLOUD_MS"); }
+        if mask & 2 == 0 { defs.remove("CLOUD_DECK"); }
+        if mask & 4 == 0 { defs.remove("WHOLE_WORLD"); }
+        let module=composer.make_naga_module(naga_oil::compose::NagaModuleDescriptor {
+            source:include_str!("sky.wgsl"),file_path:"sky/sky.wgsl",shader_defs:defs,..Default::default()
+        }).unwrap_or_else(|e|panic!("compose sky with CLOUD_SHADE (mask {mask}): {}",e.emit_to_string(&composer)));
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(),naga::valid::Capabilities::all())
+            .validate(&module)
+            .unwrap_or_else(|e|panic!("sky.wgsl with CLOUD_SHADE (mask {mask}) fails validation: {e:?}"));
+        assert!(format!("{module:?}").contains("base_amb"),"CLOUD_SHADE did not compile in");
+    }
+}
+
 // CLOUD-DECK (default; WGR_CLOUD_DECK=0 = off): the two-stream deck term validates with and without CLOUD_MS and WHOLE_WORLD.
 #[test]
 fn sky_wgsl_validates_with_cloud_deck() {
@@ -1337,6 +1357,8 @@ pub struct Sky {
     cirrus_soft: f32,
     /// RAIN-DECK: the weather's rain density as set (`set_rain`) and as eased toward it per upload
     rain: f32,
+    /// CLOUD-SHADE: dark-base strength 0..1 (Sky tab "Dark bases"), into `weather.y`
+    cloud_base_shade: f32,
     rain_now: f32,
     /// Eased, for the same reason the others are: this changes every cloud edge on screen at once.
     cirrus_soft_now: f32,
@@ -2635,6 +2657,7 @@ impl Sky {
             cirrus_soft: soft_env.unwrap_or(CIRRUS_SOFT_DEFAULT),
             rain: 0.0,
             rain_now: 0.0,
+            cloud_base_shade: 1.0,
             cirrus_soft_now: soft_env.unwrap_or(CIRRUS_SOFT_DEFAULT),
             earth_frame: [0.0; 4],
             earth_geometry: [[0.0; 4]; 4],
@@ -2802,6 +2825,11 @@ impl Sky {
 
     /// Second-layer EDGE SOFTNESS: 0 = the layer as it rendered before this existed, 1 = the big
     /// masses carry a deep soft fringe instead of a defined silhouette. Eased in `upload`.
+    /// CLOUD-SHADE: how dark broken cloud's bases go, 0..1.
+    pub fn set_cloud_base_shade(&mut self, strength: f32) {
+        self.cloud_base_shade = if strength.is_finite() { strength.clamp(0.0, 1.0) } else { 1.0 };
+    }
+
     /// RAIN-DECK: the weather's rain density (0..1); the cloud deck darkens as it rains.
     pub fn set_rain(&mut self, rain: f32) {
         self.rain = if rain.is_finite() { rain.clamp(0.0, 1.0) } else { 0.0 };
@@ -2969,7 +2997,7 @@ impl Sky {
             // .w of the two axis lanes: the moon height map's range in metres (sky.wgsl moon_height_range).
             ecef_x: [self.earth_geometry[2][0], self.earth_geometry[2][1], self.earth_geometry[2][2], self.moon_relief_range[0]],
             ecef_z: [self.earth_geometry[3][0], self.earth_geometry[3][1], self.earth_geometry[3][2], self.moon_relief_range[1]],
-            weather: [self.rain_now, 0.0, 0.0, 0.0],
+            weather: [self.rain_now, self.cloud_base_shade, 0.0, 0.0],
         };
         queue.write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&u));
         // Terrain sun-shadow mask mapping for cs_froxel's occlusion lookup (own copy so

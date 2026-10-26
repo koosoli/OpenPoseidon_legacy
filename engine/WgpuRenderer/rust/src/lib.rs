@@ -2807,6 +2807,10 @@ impl Renderer {
         self.sky.set_cirrus_softness(softness);
     }
 
+    fn set_cloud_base_shade(&mut self, strength: f32) {
+        self.sky.set_cloud_base_shade(strength);
+    }
+
     fn set_road_conform(&mut self, flat: f32, per_m: f32, max_frac: f32) {
         self.gfx3d.set_road_conform(flat, per_m, max_frac);
     }

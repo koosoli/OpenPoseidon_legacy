@@ -3435,6 +3435,10 @@ WGR_API void wgr_set_render_params(WgrRenderer* renderer, const WgrRenderParams*
        Overridable at startup with WGR_CIRRUS_SOFT=<0..1>. */
     WGR_API void wgr_set_cirrus_softness(WgrRenderer* renderer, float softness);
 
+    /* CLOUD-SHADE: how dark broken cloud's bases go below their sunlit tops, 0..1 (1 = default,
+       0 = off). A closed overcast deck is not affected. */
+    WGR_API void wgr_set_cloud_base_shade(WgrRenderer* renderer, float strength);
+
     /* Fraction of the draw distance at which distance fog reaches FULL (0.3 .. 1.0).
 
        1.0 is the behaviour from before this existed: the aerial-perspective ramp is pinned to

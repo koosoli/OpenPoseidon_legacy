@@ -90,7 +90,8 @@ struct Sky {
     moon_centre: vec4<f32>,
     ecef_x: vec4<f32>,
     ecef_z: vec4<f32>,
-    // (OP, RAIN-DECK) x: the weather's rain density 0..1, eased (renderer-written); yzw unused
+    // (OP, RAIN-DECK) x: the weather's rain density 0..1, eased (renderer-written); y: CLOUD-SHADE
+    // dark-base strength 0..1 (Sky tab "Dark bases"); zw unused
     weather: vec4<f32>,
 };
 
@@ -1738,9 +1739,14 @@ fn march_clouds(
     // planet: the camera's vertical is the deck's), the side-lit cumulus factor, the neutral-cool colour
     let deck_mu0 = max(dot(normalize(pos), sun), 0.0);
     let deck_side = mix(0.12, 0.5, 1.0 - smoothstep(-0.6, 0.3, cos_t));
+    // (2026-10-26) a closed deck's term only: on broken cumulus (0.55 coverage) it added a flat,
+    // beige light to every cloud and washed out the shaded undersides the owner signed off on the
+    // day before ("looks actually better in your picture than in my open session"). Faded in as the
+    // deck closes; below 0.7 the term is skipped and broken cloud renders as before CLOUD_DECK.
+    let deck_w = smoothstep(0.7, 0.9, cov);
     let deck_col = dot(sun_col, vec3<f32>(0.2126, 0.7152, 0.0722)) * vec3<f32>(0.93, 1.0, 1.09)
-        * mix(deck_side, deck_mu0 / PI, smoothstep(0.75, 0.95, cov));
-    let deck_up_k = 0.11 * thick * 0.35;
+        * mix(deck_side, deck_mu0 / PI, smoothstep(0.75, 0.95, cov)) * deck_w;
+    let deck_up_k = 0.11 * thick * 0.35 * deck_w;
 #endif
 
     var col = vec3<f32>(0.0);
@@ -1790,8 +1796,10 @@ fn march_clouds(
                 // with g ~ 0.85, fills the interior near-isotropically. A closed deck is a slab lit from
                 // above (E mu0 T_d / pi); broken cumulus are bright from the sunlit side and dark
                 // bodies with bright rims backlit. Neutral-cool: the mixed sun and sky at the cloud top.
-                let deck_td = 1.0 / (1.0 + 0.11 * od);
-                direct += deck_col * (deck_td * (1.0 - exp(-0.15 * od)));
+                if (deck_w > 0.0) {
+                    let deck_td = 1.0 / (1.0 + 0.11 * od);
+                    direct += deck_col * (deck_td * (1.0 - exp(-0.15 * od)));
+                }
 #endif
             }
             // SKY-004: the identical march toward the MOON. Same steps, same growth, same
@@ -1828,7 +1836,20 @@ fn march_clouds(
 #else
             let ambient = (amb_sky + amb_moon) * mix(ao_floor, 1.0, hfp);
 #endif
+#ifdef CLOUD_SHADE
+            // (OP, CLOUD-SHADE; owner, 2026-10-26: "make it that clouds are below darker than on top,
+            // they need to be illuminated by the sun and maybe also self shadowing") A cumulus is lit
+            // from the top and from the sun's side; its base sees only the ground and the shadowed
+            // body above it. The fill terms -- the sky ambient, the light scattered round inside it
+            // (MS octaves, the deck term) -- reached the base almost as strongly as the top and washed
+            // the shading out. Broken cloud only: an overcast deck (cov > ~0.85) is untouched.
+            let shade_k = (1.0 - smoothstep(0.55, 0.9, cov)) * clamp(sky.weather.y, 0.0, 1.0);
+            let base_amb = mix(1.0, 0.25 + 0.75 * smoothstep(0.0, 0.85, hfp), shade_k);
+            let base_dir = mix(1.0, 0.45 + 0.55 * smoothstep(0.0, 0.7, hfp), shade_k);
+            let scatter = direct * base_dir + ambient * base_amb;
+#else
             let scatter = direct + ambient;
+#endif
             let seg = exp(-sigma * dt);
             // In-scattered radiance over the segment: T * albedo * J * (1 - exp(-sigma*dt)), with
             // J = scatter (phase*sun + ambient). Cloud albedo ~= 1 (scattering >> absorption), so

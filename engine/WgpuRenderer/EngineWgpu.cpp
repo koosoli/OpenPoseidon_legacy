@@ -3642,6 +3642,7 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
         wgr_set_cirrus_puffiness(_renderer, s.cirrusPuffiness, s.cirrusPuffVariation);
         wgr_set_cirrus_look(_renderer, s.cirrusAmount, s.cirrusMatchDeck);
         wgr_set_cirrus_softness(_renderer, s.cirrusSoftness);
+        wgr_set_cloud_base_shade(_renderer, s.cloudBaseShade);
         wgr_set_fog_far_close(_renderer, s.fogFarClose);
         wgr_set_god_rays(_renderer, s.godRays ? 1u : 0u, s.godRayIntensity, s.godRayDensity,
                          s.godRayDistance, s.godRayG, s.godRayCloudInfluence,
