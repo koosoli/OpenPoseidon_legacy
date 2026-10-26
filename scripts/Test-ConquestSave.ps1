@@ -89,6 +89,8 @@ try {
         if ($p.HasExited -or [DateTime]::UtcNow -gt $deadline) { throw 'Conquest never became active' }
         Start-Sleep -Seconds 2
     }
+    # The mission opens on its setup screen: start the war as WEST, leading a squad.
+    $null = Eval 'conquestStart ["WEST", "soldier"]'
     Start-Sleep -Seconds 4
     $null = Eval 'conquestCommanderView true'
     $null = Eval 'conquestCommanderView false'

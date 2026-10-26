@@ -36,7 +36,8 @@ struct ObjectiveDef
     std::string name;
     float x = 0.0f; // map metres, east
     float y = 0.0f; // map metres, north
-    float radius = 120.0f;
+    float radius = 120.0f;        // the town: spawning, threat, the map's area ring
+    float captureRadius = 30.0f;  // round the command post at (x, y): only soldiers here take it
     float value = 5.0f; // income per minute while owned
     ObjectiveKind kind = ObjectiveKind::Town;
     int initialOwner = NoSide;

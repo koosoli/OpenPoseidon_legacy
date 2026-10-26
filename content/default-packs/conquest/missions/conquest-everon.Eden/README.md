@@ -4,7 +4,7 @@ A war between WEST (HQ Morton) and EAST (HQ the airfield) over Figari, Entre Deu
 Montignac, Gravette and Tyrone. The engine's Conquest referee (`engine/Poseidon/Game/Conquest`)
 reads `class CfgConquest` in `description.ext`; everything else (squads, orders, captures,
 purchases, cleanup, map markers) is the referee's work. The player starts as a WEST squad leader
-(`startAs = "soldier"`); Ctrl+M opens the commander view.
+(`startAs = "soldier"`; the setup screen offers the side and start); Ctrl+M opens the commander view.
 
 It ships in the `@OP_Conquest` content pack (`Missions\OpenPoseidon`), started by the main menu's
 CONQUEST entry. From the repository:
