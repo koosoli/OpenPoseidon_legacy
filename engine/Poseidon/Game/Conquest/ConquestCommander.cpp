@@ -118,9 +118,15 @@ std::vector<Intent> PlanStandard(const SideView& view, const CommanderTuning& tu
     {
         if (slot.group->locked)
             continue;
-        if (slot.group->stalled)
+        if (slot.group->stalled || (slot.group->airborne && slot.task == TaskKind::Defend))
         {
             slot.task = TaskKind::None;
+            slot.objective = -1;
+            continue;
+        }
+        if (slot.group->airborne && slot.task == TaskKind::Attack && Owns(war, view.side, slot.objective))
+        {
+            slot.task = TaskKind::None; // taken: a helicopter does not stay to hold it
             slot.objective = -1;
             continue;
         }
@@ -143,7 +149,8 @@ std::vector<Intent> PlanStandard(const SideView& view, const CommanderTuning& tu
         if (slot.task != TaskKind::None && slot.objective >= 0)
             force[slot.objective] += static_cast<float>(slot.group->men);
 
-    const auto nearestFree = [&](int objective, bool allowDepleted) -> Slot*
+    const auto depleted = [&](const GroupView& g) { return !g.crew && g.men <= tuning.depletedMen; };
+    const auto nearestFree = [&](int objective, bool defend) -> Slot*
     {
         Slot* best = nullptr;
         float bestDist = std::numeric_limits<float>::max();
@@ -151,8 +158,8 @@ std::vector<Intent> PlanStandard(const SideView& view, const CommanderTuning& tu
         {
             if (slot.task != TaskKind::None || slot.group->locked)
                 continue;
-            if (!allowDepleted && slot.group->men <= tuning.depletedMen)
-                continue;
+            if (defend ? slot.group->airborne : depleted(*slot.group))
+                continue; // worn-out squads only defend; helicopters never do
             const float d = Distance(slot.group->x, slot.group->y, war.defs[objective].x, war.defs[objective].y);
             if (d < bestDist)
             {
@@ -229,7 +236,7 @@ std::vector<Intent> PlanStandard(const SideView& view, const CommanderTuning& tu
             {
                 if (force[primary] >= attackNeed(primary))
                     break;
-                if (slot.task != TaskKind::Defend || slot.group->men <= tuning.depletedMen || slot.group->locked)
+                if (slot.task != TaskKind::Defend || depleted(*slot.group) || slot.group->locked)
                     continue;
                 if (!Rear(view, slot.objective) || Threatened(view, slot.objective))
                     continue;
@@ -249,7 +256,7 @@ std::vector<Intent> PlanStandard(const SideView& view, const CommanderTuning& tu
     {
         if (slot.task != TaskKind::None || slot.group->locked)
             continue;
-        if (spread > 0 && slot.group->men > tuning.depletedMen)
+        if (spread > 0 && (!depleted(*slot.group) || slot.group->airborne))
         {
             int best = targets[0].first;
             float bestShare = std::numeric_limits<float>::max();
@@ -280,7 +287,7 @@ std::vector<Intent> PlanStandard(const SideView& view, const CommanderTuning& tu
                 nearest = i;
             }
         }
-        if (nearest >= 0)
+        if (nearest >= 0 && !slot.group->airborne)
             assign(slot, TaskKind::Defend, nearest, "regrouping");
     }
 

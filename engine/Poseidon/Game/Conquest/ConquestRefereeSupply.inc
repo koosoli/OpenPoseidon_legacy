@@ -6,8 +6,8 @@
 // barely grows by itself (SupplyTrickle a minute) and is lost when the base changes hands, so supplies
 // reach the front by truck: supply squads (role "supply": a crew in an ammunition truck) load at the HQ,
 // drive to the base that needs them most, unload and come back. A truck destroyed on the way loses its
-// load. The AI commanders keep one truck for every three bases (at most three); the player's trucks run
-// by themselves too.
+// load. Every side keeps one truck for every three bases (at most three), under the AI or a human
+// commander, and the trucks run by themselves.
 
 constexpr float SupplyLoad = 300.0f;     // what one truck carries
 constexpr float SupplyReserve = 150.0f;  // the HQ keeps this much for itself when loading

@@ -2,6 +2,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <map>
 #include <set>
 #include <string>
 
@@ -444,6 +445,32 @@ TEST_CASE("conquest commander: a rear objective keeps no garrison", "[conquest]"
     }
     CHECK(rearFreed);
     CHECK(frontKept);
+}
+
+TEST_CASE("conquest commander: helicopters attack or carry, never hold a place", "[conquest]")
+{
+    War war = LineWar();
+    for (int i : {1, 2})
+    {
+        war.states[i].owner = 0;
+        war.states[i].holder = 0;
+        war.states[i].level = 1.0f;
+    }
+    SideView v = ViewOf(war, 0);
+    GroupView gunship{1, 2000.0f, 0.0f, 2, TaskKind::Defend, 2, false}; // two pilots, told to hold B
+    gunship.crew = gunship.airborne = true;
+    GroupView idle{2, 1000.0f, 0.0f, 2, TaskKind::None, -1, false}; // another gunship, nothing to do
+    idle.crew = idle.airborne = true;
+    GroupView tank{3, 1000.0f, 0.0f, 3, TaskKind::None, -1, false}; // a tank: three men, not worn out
+    tank.crew = true;
+    v.groups = {gunship, idle, tank};
+    std::map<int, TaskKind> given;
+    for (const Intent& i : PlanStandard(v, CommanderTuning()))
+        if (i.kind == Intent::Kind::Assign)
+            given[i.group] = i.task;
+    CHECK(given[1] == TaskKind::Attack); // freed from holding B, and sent to attack
+    CHECK(given[2] == TaskKind::Attack); // not "regrouping" at the nearest base
+    CHECK(given[3] == TaskKind::Attack);
 }
 
 TEST_CASE("conquest commander: spare squads spread over the front instead of one column", "[conquest]")

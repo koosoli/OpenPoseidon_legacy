@@ -47,6 +47,8 @@ function Invoke-Run($name, [scriptblock]$body, [string]$runMission = $mission) {
     $env:POSEIDON_USER_DIR = Join-Path $out 'user'
     New-Item -ItemType Directory -Force $env:POSEIDON_USER_DIR | Out-Null
     [IO.File]::WriteAllLines((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'), @('qualityPreset=1;', 'dlssMode=0;', 'vsync=0;', 'fpsCap=60;'))
+    # Speech by the offline Windows voices (no key): the squad leaders' radio answers are heard (B).
+    [IO.File]::WriteAllText((Join-Path $env:POSEIDON_USER_DIR 'npcChat.json'), '{"tts": 1}')
     $env:POSEIDON_RNG_SEED = '9'
     $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
     $listener.Start(); $port = $listener.LocalEndpoint.Port; $listener.Stop()
@@ -94,6 +96,8 @@ function Send($command) {
 }
 function Eval($code) { return "$((Send @{cmd = 'eval'; code = $code }).result)".Trim('"') }
 function Shot($name) { $null = Send @{cmd = 'screenshot'; path = (Join-Path $script:out ($name + '.png')) } }
+# The commander camera: [x, y, distance] (the soldier in focus, 4th, is left out: his name has digits).
+function Cam { return @([regex]::Matches((Eval 'conquestCameraState'), '-?\d+(\.\d+)?(e-?\d+)?') | Select-Object -First 3 | ForEach-Object { [double]$_.Value }) }
 function LogCount($pattern) { return ([regex]::Matches((Get-Content $script:log -Raw), $pattern)).Count }
 # Waits for something to happen in the game run it at 4x: the checks are about game time, and the real-time
 # waits were most of the test (a plane's flight, a helicopter's 1.9 km).
@@ -166,6 +170,34 @@ Invoke-Run 'B-commander' {
     Start-Sleep -Seconds 5
     Shot 'back-in-command'
     Check ((LogCount 'the soldier you controlled was killed; back in command') -ge 1) 'B: the death returned the player to command'
+    # The wheel: zooming out leaves the camera where it is; zooming in moves it toward the pointer, a little.
+    $null = Eval 'conquestCamera [4772, 10700, 700, 55, 180]'
+    Start-Sleep -Seconds 1
+    $c0 = Cam
+    $null = Send @{cmd = 'mouse_wheel'; steps = -2; x = 900; y = 300 }
+    Start-Sleep -Seconds 1
+    $c1 = Cam
+    Check ([Math]::Abs($c1[0] - $c0[0]) -lt 1 -and [Math]::Abs($c1[1] - $c0[1]) -lt 1 -and $c1[2] -gt $c0[2]) "B: zooming out keeps the camera in place ($c0 -> $c1)"
+    $null = Send @{cmd = 'mouse_wheel'; steps = 1; x = 900; y = 300 }
+    Start-Sleep -Seconds 1
+    $c2 = Cam
+    $moved = [Math]::Sqrt(($c2[0] - $c1[0]) * ($c2[0] - $c1[0]) + ($c2[1] - $c1[1]) * ($c2[1] - $c1[1]))
+    Check ($moved -gt 0 -and $moved -le $c1[2] / 3 + 1 -and $c2[2] -lt $c1[2]) "B: zooming in moves toward the pointer, at most a third of the distance ($moved m)"
+    # Any soldier, not just the leader: Tab steps to the next man of the selected squad, T takes control of him.
+    Check ((Eval 'conquestCamera [9, 25, 30]') -eq 'true') 'B: following squad 9'
+    $null = Send @{cmd = 'key'; sc = 43 }
+    Start-Sleep -Seconds 1
+    Check ((Eval 'conqTestU = conquestCameraState select 3; format ["%1", !(isNull conqTestU) && conqTestU != leader group conqTestU]') -eq 'true') 'B: Tab focuses a soldier who is not the leader'
+    $null = Send @{cmd = 'key'; sc = 23 }
+    Start-Sleep -Seconds 3
+    Check ((Eval 'format ["%1", player == conqTestU]') -eq 'true') 'B: T takes control of that very soldier'
+    $null = Eval 'player setDammage 1'
+    Start-Sleep -Seconds 5
+    Check ((LogCount 'the soldier you controlled was killed; back in command') -ge 2) 'B: back in command'
+    # A command answered on the radio, in the squad leader's voice.
+    Check ((Eval 'conquestSquad [[10], "holdfire"]') -eq '1') 'B: squad 10 told to hold fire'
+    Start-Sleep -Seconds 4
+    Check ((LogCount 'for speaker radio') -ge 1) 'B: the squad leader answered on the radio'
     Check ((Eval 'conquestState') -notmatch 'inactive') 'B: the war still runs'
     # Air support shot down on the way in: no bombs, the strike is lost.
     $air = Eval 'conquestAirStrike [4700, 10450]'
@@ -178,6 +210,10 @@ Invoke-Run 'B-commander' {
     Start-Sleep -Seconds 10
     Normal
     Check ((LogCount 'EAST air strike: bombs away') -eq 0) 'B: a downed plane drops nothing'
+    # Leaving the command view: the AI commander takes over at once.
+    $null = Eval 'conquestCommanderView false'
+    Start-Sleep -Seconds 2
+    Check ((LogCount 'EAST is back under the AI commander') -ge 1) 'B: the AI takes command when the player leaves it'
 }
 
 Invoke-Run 'C-barrage' {

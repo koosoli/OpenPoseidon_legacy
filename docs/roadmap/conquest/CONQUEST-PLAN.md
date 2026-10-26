@@ -870,3 +870,33 @@ The feature test runs its waits for planes and the helicopter at 4x: 4 minutes i
 
 Open: an occasional "Out of map" (OperMap path planning falling back to a straight path, 0-3 a war) and the
 pre-existing `[ai]` unit test "EntityEvent enum names" failure; neither is from Conquest.
+
+### Status 2026-10-26 (night, 2): the owner's play-test round
+
+- **Wheel zoom** moved the camera: zooming out slid it away from the pointer, a pointer near the horizon
+  (ground kilometres off) moved it far per step, and a selection long scrolled out of view pulled it there.
+  Now only zooming in moves the camera, by at most a third of its distance a step, toward the selection only
+  while it is on screen.
+- **Orders are answered on the radio** in the squad leader's own voice when NPC chat's voices are on
+  (`NpcChat::SayOnRadio`, a voice per squad, through the radio filter): "Bravo copies, attacking Figari".
+  Without voices, the game's own radio confirmation as before.
+- **Any soldier**: the selection bar lists the selected squad's soldiers (leader first); a button or Tab
+  focuses one, the camera follows him, and Take control (T) becomes exactly him. A vehicle picked on the
+  map stands for its crew: the squad's man in it is the soldier picked. Players are never taken over.
+- **The AI takes command at once** when the player leaves it (the command view closed, a soldier taken
+  over): orders the human gave were held for 10 minutes and the planner waited for its round; now they are
+  released and the side replans the same tick. Supply runs the commander set stay.
+- **Supply trucks under a human commander**: the supply line kept its trucks only under the AI, so a side
+  the player commanded had none. Every side now keeps one per three bases (at most three).
+- **More supplies at the start**: 2000 a side (was 500; the setup screen sets each side's, 0-5000). A profile
+  still holding the old default takes the new one.
+- **Fire support**: the AI called its mortars and plane almost never (none in an 80-minute soak): it decided
+  after spending on squads and kept a squad's price in reserve, wanted three enemies within 60 m, and
+  refused with any of its own men within 120 m. Now support comes before purchases, two enemies (a vehicle
+  counts twice) within 80 m are enough, and the safety distance is 90 m.
+- **Helicopters never hold a place**: a gunship's crew of two counted as a worn-out squad, which only ever
+  defends -- gunships "regrouped" at bases. Vehicle crews are never worn out now, and a helicopter squad still
+  in the air (a gunship, or air assault not yet set down) only attacks or carries.
+
+Tests: `mouse_wheel` harness command and `conquestCameraState`; the feature test checks the wheel, Tab and
+T on a non-leader, the radio answer (offline Windows voices) and the AI taking over.

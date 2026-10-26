@@ -282,15 +282,17 @@ std::string VoiceInstructions(const SpeakerInfo& who)
 /// Queue text-to-speech for one line (game thread); the WAV comes back into s_speechQueue.
 /// Returns false when nothing was queued.
 bool Speak(const Settings& s, int registryId, const std::string& speakerId, const std::string& text, int chorus = 0,
-           const std::string& voiceOverride = {})
+           const std::string& voiceOverride = {}, const SpeakerInfo* resolved = nullptr)
 {
     if (s.tts == TtsProvider::Off || text.empty())
         return false;
-    const SpeakerInfo who = ResolveSpeaker(registryId, speakerId);
+    // `resolved`: a speaker the caller knows itself (SayOnRadio), heard over the radio.
+    const SpeakerInfo who = resolved ? *resolved : ResolveSpeaker(registryId, speakerId);
     if (!who.valid)
         return false;
     // A voice preview (voiceOverride) plays clean, so the player hears the voice itself.
-    const bool radio = voiceOverride.empty() && (who.isHq || (s.ttsRadioWhenFar && who.distance > kRadioDistance));
+    const bool radio = voiceOverride.empty() &&
+                       (resolved || who.isHq || (s.ttsRadioWhenFar && who.distance > kRadioDistance));
     const std::string voice = voiceOverride.empty() ? PickVoice(s, who) : voiceOverride;
     const std::string instructions =
         chorus ? std::string("A soldier in a squad shouting in unison with the others, loud and sharp.")
@@ -382,6 +384,22 @@ bool Speak(const Settings& s, int registryId, const std::string& speakerId, cons
     return true;
 }
 
+} // namespace
+
+bool SayOnRadio(const std::string& name, int voiceSeed, const std::string& text)
+{
+    SpeakerInfo who;
+    who.valid = true;
+    who.id = "radio";
+    who.name = name;
+    who.distance = 1.0e6f;
+    who.voiceSeed = voiceSeed;
+    LoadRememberedKeys(); // the cloud voice's key, before the first line (else a Windows voice speaks)
+    return Speak(CurrentSettings(), 0, "radio", text, 0, {}, &who);
+}
+
+namespace
+{
 void StartSpeech(Speech speech, float volume)
 {
     // 3D only when the speaker has a place in the world (not HQ, not a voice preview); decided before
