@@ -103,6 +103,24 @@ try {
         $picked = Eval 'conquestMapClick [[5134, 3955, 0], false, false]'
         $ordered = Eval 'conquestMapClick [[4935, 6994, 0], false, false]'
         Write-Output "commander test: select=$picked order=$ordered"
+        # The top-down commander view (Ctrl+M), and a purchase through the same path its HUD uses.
+        $view = Eval 'conquestCommanderView true'
+        Start-Sleep -Seconds 3
+        $null = Send @{cmd = 'screenshot'; path = (Join-Path $out 'commander-0.png') }
+        $bought = Eval 'conquestBuy ["Morton", "Recon"]'
+        Write-Output "commander view: open=$view buy=$bought"
+        Start-Sleep -Seconds 20
+        $null = Send @{cmd = 'screenshot'; path = (Join-Path $out 'commander-1.png') }
+        Start-Sleep -Seconds 1
+        # Take over a squad leader (the first WEST squad), look through his eyes, then back to command.
+        $took = Eval 'conquestTakeControl 1'
+        Start-Sleep -Seconds 4
+        $null = Send @{cmd = 'screenshot'; path = (Join-Path $out 'commander-2-soldier.png') }
+        $back = Eval 'conquestCommanderView true'
+        Start-Sleep -Seconds 3
+        $null = Send @{cmd = 'screenshot'; path = (Join-Path $out 'commander-3-back.png') }
+        Write-Output "take control: $took, back in command: $back"
+        $null = Eval 'conquestCommanderView false'
     }
     $start = [DateTime]::UtcNow
     $poll = 0

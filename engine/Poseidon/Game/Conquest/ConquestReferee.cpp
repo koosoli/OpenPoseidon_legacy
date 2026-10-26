@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <Poseidon/Game/Conquest/ConquestReferee.hpp>
+#include <Poseidon/Game/Conquest/ConquestView.hpp>
 
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AICenter.hpp>
@@ -13,6 +14,8 @@
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/Network/NetworkIface.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
+#include <Poseidon/UI/InGame/InGameUI.hpp>
+#include <Poseidon/World/Entities/Vehicles/Transport.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -48,7 +51,8 @@ constexpr float BodySeconds = 300.0f;
 constexpr float BodyHideDistance = 300.0f;
 constexpr size_t LogLines = 200;
 constexpr float HumanLockSeconds = 600.0f; // a commander's order outranks the AI planner this long
-constexpr float PickRadius = 150.0f;       // a map click this close to a squad selects it
+constexpr float PickRadius = 150.0f;
+constexpr float DismountDistance = 180.0f; // under AIGroup::Move's 200 m mount distance, so they do not fight       // a map click this close to a squad selects it
 
 struct GroupRecord
 {
@@ -64,6 +68,7 @@ struct GroupRecord
     bool stalled = false;
     float lockedUntil = -1.0e9f; // a human commander's order holds until then
     bool selected = false;       // in the human commander's map selection
+    int type = 0;                // index into Config::squads
 };
 
 struct UnitRecord
@@ -72,18 +77,32 @@ struct UnitRecord
     int side = NoSide;
     float lastDamage = 0.0f;
     float deadAt = -1.0f;
+    bool vehicle = false; // a squad's car or helicopter: its loss is not a soldier's
+};
+
+// One kind of squad a side can buy: a name, a price and the classes it is made of per side.
+struct SquadDef
+{
+    std::string id; // the config class name
+    std::string name;
+    float cost = 80.0f;
+    std::string role = "foot"; // foot, motorised, mechanised, air: how the AI commanders choose
+    bool aiBuys = true;
+    std::array<std::vector<RString>, MaxSides> classes;
+    std::array<std::vector<RString>, MaxSides> vehicles; // spawned empty beside the squad, given to it
 };
 
 struct Config
 {
     std::array<TargetSide, MaxSides> engineSide{TWest, TEast, TGuerrila};
-    std::array<std::vector<RString>, MaxSides> roster;
+    std::vector<SquadDef> squads; // [0] is the rifle squad the AI commanders buy
     float startPool = 300.0f;
     int cap = 60;
     float squadCost = 80.0f;
-    int startSquads = 3;
+    std::vector<int> startSquads{0, 0, 0}; // squad types each HQ starts with, free
     float planSeconds = 20.0f;
     bool groupMarkers = true; // every squad on the map with its task (observer / debugging view)
+    bool possession = true;   // the commander may take control of any friendly soldier
 };
 
 struct Referee
@@ -105,6 +124,9 @@ struct Referee
     std::array<int, MaxSides> bought{};
     int nextGroupId = 1;
     int playerSide = NoSide; // the side the player can command from the map
+    bool humanCommander = false; // the player has the commander view open: purchases are theirs
+    OLink<Person> commanderBody;  // the player's own body while they are inside a soldier
+    bool reopenView = false;      // the possessed soldier died: the view opens again
     float lastTick = -1.0f;
     float lastStatus = -1.0e9f;
     std::vector<std::string> markerText; // per objective, what its label marker last said
@@ -226,22 +248,69 @@ bool LoadConfig(Referee& r, const ParamEntry& cfg)
     r.config.startPool = Number(cfg, "startPool", r.config.startPool);
     r.config.cap = static_cast<int>(Number(cfg, "cap", static_cast<float>(r.config.cap)));
     r.config.squadCost = Number(cfg, "squadCost", r.config.squadCost);
-    r.config.startSquads = static_cast<int>(Number(cfg, "startSquads", static_cast<float>(r.config.startSquads)));
     r.config.planSeconds = std::max(5.0f, Number(cfg, "planSeconds", r.config.planSeconds));
     r.config.groupMarkers = Number(cfg, "groupMarkers", 1.0f) != 0.0f;
+    r.config.possession = Number(cfg, "possession", 1.0f) != 0.0f;
     r.tuning.baseCaptureSeconds = Number(cfg, "captureSeconds", r.tuning.baseCaptureSeconds);
     r.tuning.securityRadius = Number(cfg, "securityRadius", r.tuning.securityRadius);
     r.tuning.startScore = Number(cfg, "startScore", r.tuning.startScore);
     r.tuning.scoreDrainPerObjective = Number(cfg, "scoreDrain", r.tuning.scoreDrainPerObjective);
 
-    if (const ParamEntry* rosters = cfg.FindEntry("Rosters"); rosters && rosters->IsClass())
-        for (int s = 0; s < r.war.sideCount; s++)
-            for (const std::string& cls : Strings(*rosters, SideLabel(r.config.engineSide[s])))
-                r.config.roster[s].push_back(RString(cls.c_str()));
-    for (int s = 0; s < r.war.sideCount; s++)
-        if (r.config.roster[s].empty())
+    // class Squads { class Rifle { name; cost; WEST[]; EAST[]; }; ... } -- or, older, one
+    // class Rosters { WEST[]; EAST[]; } priced by squadCost.
+    if (const ParamEntry* squads = cfg.FindEntry("Squads"); squads && squads->IsClass())
+        for (int i = 0; i < squads->GetEntryCount(); i++)
         {
-            LOG_WARN(Mission, "Conquest: Rosters has no squad for {}", SideLabel(r.config.engineSide[s]));
+            const ParamEntry& e = squads->GetEntry(i);
+            if (!e.IsClass())
+                continue;
+            SquadDef def;
+            def.id = static_cast<const char*>(e.GetName());
+            def.name = Text(e, "name", def.id.c_str());
+            def.cost = Number(e, "cost", r.config.squadCost);
+            def.role = Text(e, "role", "foot");
+            def.aiBuys = Number(e, "ai", 1.0f) != 0.0f;
+            for (int s = 0; s < r.war.sideCount; s++)
+            {
+                const std::string side = SideLabel(r.config.engineSide[s]);
+                for (const std::string& cls : Strings(e, side.c_str()))
+                    def.classes[s].push_back(RString(cls.c_str()));
+                for (const std::string& cls : Strings(e, (side + "vehicles").c_str()))
+                    def.vehicles[s].push_back(RString(cls.c_str()));
+            }
+            r.config.squads.push_back(def);
+        }
+    if (r.config.squads.empty())
+        if (const ParamEntry* rosters = cfg.FindEntry("Rosters"); rosters && rosters->IsClass())
+        {
+            SquadDef def;
+            def.name = "Rifle squad";
+            def.cost = r.config.squadCost;
+            for (int s = 0; s < r.war.sideCount; s++)
+                for (const std::string& cls : Strings(*rosters, SideLabel(r.config.engineSide[s])))
+                    def.classes[s].push_back(RString(cls.c_str()));
+            r.config.squads.push_back(def);
+        }
+    if (r.config.squads.empty())
+    {
+        LOG_WARN(Mission, "Conquest: CfgConquest needs class Squads (or Rosters)");
+        return false;
+    }
+    // startSquads = 3 (that many of the first type) or startSquads[] = {"Motorised", "Rifle"}.
+    if (const ParamEntry* start = cfg.FindEntry("startSquads"); start && start->IsArray())
+    {
+        r.config.startSquads.clear();
+        for (const std::string& id : Strings(cfg, "startSquads"))
+            for (size_t t = 0; t < r.config.squads.size(); t++)
+                if (r.config.squads[t].id == id)
+                    r.config.startSquads.push_back(static_cast<int>(t));
+    }
+    else
+        r.config.startSquads.assign(static_cast<size_t>(Number(cfg, "startSquads", 3.0f)), 0);
+    for (int s = 0; s < r.war.sideCount; s++)
+        if (r.config.squads[0].classes[s].empty())
+        {
+            LOG_WARN(Mission, "Conquest: the first squad type has no units for {}", SideLabel(r.config.engineSide[s]));
             return false;
         }
 
@@ -388,12 +457,36 @@ void OrderPoint(GroupRecord& rec, const Vector3& destination, float now)
     rec.orderedAt = now;
 }
 
-bool SpawnSquad(Referee& r, int side, int base, bool free)
+// An empty vehicle of class `cls` at (x, y), through the createVehicle command.
+EntityAI* CreateVehicleAt(const RString& cls, float x, float y)
 {
+    GameState* gs = GWorld->GetGameState();
+    if (!gs)
+        return nullptr;
+    GameValue pos = gs->CreateGameValue(GameArray);
+    GameArrayType& p = pos;
+    p.Add(GameValue(x));
+    p.Add(GameValue(y));
+    p.Add(GameValue(0.0f));
+    GameVarSpace space;
+    gs->BeginContext(&space);
+    gs->VarSetLocal("_p", pos, true, true);
+    gs->VarSetLocal("_t", GameValue(cls), true, true);
+    const GameValue made = gs->EvaluateMultiple("_t createVehicle _p");
+    gs->EndContext();
+    return dyn_cast<EntityAI>(GetObject(made));
+}
+
+// Returns the new squad's id, 0 when nothing could be created.
+int SpawnSquad(Referee& r, int side, int base, bool free, int type = 0)
+{
+    if (type < 0 || type >= static_cast<int>(r.config.squads.size()))
+        return 0;
+    const SquadDef& squad = r.config.squads[type];
     AICenter* center = Center(side);
     GameState* gs = GWorld->GetGameState();
-    if (!center || !gs || center->NGroups() >= MaxGroups)
-        return false;
+    if (!center || !gs || center->NGroups() >= MaxGroups || squad.classes[side].empty())
+        return 0;
     const Vector3 at = SpawnPoint(r, side, base);
     Ref<AIGroup> group = new AIGroup();
     center->AddGroup(group);
@@ -404,7 +497,7 @@ bool SpawnSquad(Referee& r, int side, int base, bool free)
     GetNetworkManager().CreateObject(group);
 
     int made = 0;
-    for (const RString& cls : r.config.roster[side])
+    for (const RString& cls : squad.classes[side])
     {
         GameValue pos = gs->CreateGameValue(GameArray);
         GameArrayType& p = pos;
@@ -427,22 +520,42 @@ bool SpawnSquad(Referee& r, int side, int base, bool free)
     if (made == 0)
     {
         group->RemoveFromCenter();
-        LOG_WARN(Mission, "Conquest: no unit of the {} roster could be created", Name(side));
-        return false;
+        LOG_WARN(Mission, "Conquest: no unit of the {} {} could be created", Name(side), squad.name);
+        return 0;
     }
+    // The squad's own cars or helicopter, parked beside it. A move of more than 200 m mounts
+    // the squad (AIGroup::Move); TrackGroups dismounts it near the destination.
+    int parked = 0;
+    for (const RString& cls : squad.vehicles[side])
+    {
+        const float off = 14.0f * static_cast<float>(++parked);
+        if (EntityAI* veh = CreateVehicleAt(cls, at.X() + off, at.Z() + off * 0.5f))
+        {
+            if (Transport* transport = dyn_cast<Transport>(veh))
+                group->AddVehicle(transport);
+            UnitRecord u;
+            u.unit = veh;
+            u.side = side;
+            u.vehicle = true;
+            r.units.push_back(u);
+        }
+    }
+    if (parked)
+        group->AssignVehicles();
     GroupRecord rec;
     rec.id = r.nextGroupId++;
     rec.side = side;
+    rec.type = type;
     rec.group = group.GetRef();
     rec.bestAt = Now();
     r.groups.push_back(rec);
     r.live[side] += made;
     if (!free)
     {
-        r.war.pool[side] -= r.config.squadCost;
+        r.war.pool[side] -= squad.cost;
         r.bought[side]++;
     }
-    return true;
+    return rec.id;
 }
 
 // ---- markers -----------------------------------------------------------------------------
@@ -638,8 +751,11 @@ void TrackUnits(Referee& r, float now)
             if (unit->IsDammageDestroyed())
             {
                 u.deadAt = now;
-                r.losses[u.side]++;
-                RecordLoss(r.war, u.side, r.tuning);
+                if (!u.vehicle)
+                {
+                    r.losses[u.side]++;
+                    RecordLoss(r.war, u.side, r.tuning);
+                }
             }
             else
             {
@@ -674,6 +790,21 @@ void TrackGroups(Referee& r, float now)
             r.groups.erase(r.groups.begin() + static_cast<std::ptrdiff_t>(i));
             continue;
         }
+        // Mounted squads get out once they are close: a truck is not a place to fight from.
+        if (grp->NVehicles() > 0 && rec.task != TaskKind::None &&
+            std::hypot(grp->Leader()->Position().X() - rec.destination.X(),
+                       grp->Leader()->Position().Z() - rec.destination.Z()) < DismountDistance)
+        {
+            bool mounted = false;
+            for (int id = 1; id <= MAX_UNITS_PER_GROUP; id++)
+                if (AIUnit* unit = grp->UnitWithID(id); unit && !unit->IsFreeSoldier())
+                {
+                    unit->OrderGetIn(false);
+                    mounted = true;
+                }
+            if (mounted)
+                grp->GetInVehicles();
+        }
         if (rec.task == TaskKind::Move)
         {
             if (now >= rec.lockedUntil)
@@ -702,7 +833,7 @@ void TrackGroups(Referee& r, float now)
                 WarLog(Name(rec.side) + " group " + std::to_string(rec.id) + " stalled on the way to " + d.name);
             }
             // The order can be used up (reached, or replaced by combat); give it again if still far.
-            if (dist > d.radius * 0.8f && now - rec.orderedAt > ReorderSeconds && grp->MainSubgroup() &&
+            if (!grp->IsAnyPlayerGroup() && dist > d.radius * 0.8f && now - rec.orderedAt > ReorderSeconds && grp->MainSubgroup() &&
                 !grp->MainSubgroup()->HasCommand())
                 Order(rec, d, now);
         }
@@ -719,8 +850,8 @@ SideView BuildView(Referee& r, int side, float now)
     v.pool = r.war.pool[side];
     v.live = r.live[side];
     v.cap = r.config.cap;
-    v.squadCost = r.config.squadCost;
-    v.squadSize = static_cast<int>(r.config.roster[side].size());
+    v.squadCost = r.config.squads[0].cost;
+    v.squadSize = static_cast<int>(r.config.squads[0].classes[side].size());
     const size_t n = r.war.defs.size();
     v.knownEnemy.assign(n, 0.0f);
     v.canSpawn.assign(n, false);
@@ -760,10 +891,40 @@ SideView BuildView(Referee& r, int side, float now)
         g.task = rec.task;
         g.objective = rec.objective;
         g.stalled = rec.stalled;
-        g.locked = now < rec.lockedUntil;
+        g.locked = now < rec.lockedUntil || grp->IsAnyPlayerGroup();
         v.groups.push_back(g);
     }
     return v;
+}
+
+// What an AI commander buys at `base`: by the distance to its front, the fastest kind it can
+// afford (air over 2.5 km, motorised over 900 m, armour when rich), else a rifle squad.
+int ChooseSquadType(const Referee& r, int side, int base)
+{
+    float front = 1.0e9f;
+    for (size_t o = 0; o < r.war.defs.size(); o++)
+        if (CanAttack(r.war, side, static_cast<int>(o)))
+            front = std::min(front, std::hypot(r.war.defs[o].x - r.war.defs[base].x, r.war.defs[o].y - r.war.defs[base].y));
+    const float pool = r.war.pool[side];
+    const auto affordable = [&](int t)
+    {
+        const SquadDef& d = r.config.squads[t];
+        return d.aiBuys && !d.classes[side].empty() && pool >= d.cost &&
+               r.live[side] + static_cast<int>(d.classes[side].size()) <= r.config.cap;
+    };
+    std::vector<const char*> wanted;
+    if (front > 2500.0f)
+        wanted = {"air", "motorised", "mechanised"};
+    else if (front > 900.0f)
+        wanted = {"motorised", "mechanised"};
+    for (const char* role : wanted)
+        for (size_t t = 0; t < r.config.squads.size(); t++)
+            if (r.config.squads[t].role == role && affordable(static_cast<int>(t)))
+                return static_cast<int>(t);
+    for (size_t t = 0; t < r.config.squads.size(); t++)
+        if (r.config.squads[t].role == "mechanised" && pool >= 2.0f * r.config.squads[t].cost && affordable(static_cast<int>(t)))
+            return static_cast<int>(t);
+    return affordable(0) ? 0 : -1;
 }
 
 void Plan(Referee& r, int side, float now)
@@ -774,24 +935,29 @@ void Plan(Referee& r, int side, float now)
     {
         if (intent.kind == Intent::Kind::BuySquad)
         {
+            // While the player commands this side, its supplies are theirs to spend.
+            if (side == r.playerSide && r.humanCommander)
+                continue;
             std::string why;
             if (!SpawnEligible(r.war, side, intent.objective, now, r.tuning, &why))
             {
                 WarLog(Name(side) + " purchase at " + r.war.defs[intent.objective].name + " refused: " + why);
                 continue;
             }
-            if (r.war.pool[side] < r.config.squadCost || r.live[side] + view.squadSize > r.config.cap)
+            const int type = ChooseSquadType(r, side, intent.objective);
+            if (type < 0)
                 continue;
-            if (SpawnSquad(r, side, intent.objective, false))
-                WarLog(Name(side) + " bought a squad at " + r.war.defs[intent.objective].name + " (" + intent.why + ")");
+            if (SpawnSquad(r, side, intent.objective, false, type))
+                WarLog(Name(side) + " bought a " + r.config.squads[type].name + " at " +
+                       r.war.defs[intent.objective].name + " (" + intent.why + ")");
             continue;
         }
         for (GroupRecord& rec : r.groups)
         {
             if (rec.id != intent.group)
                 continue;
-            if (now < rec.lockedUntil)
-                break; // the human commander's order stands
+            if (now < rec.lockedUntil || (rec.group && rec.group->IsAnyPlayerGroup()))
+                break; // the human commander's order stands, or the player leads this squad
             rec.task = intent.task;
             rec.objective = intent.objective;
             rec.stalled = false;
@@ -881,8 +1047,8 @@ void Tick(Referee& r, float dt, float now)
         for (int s = 0; s < r.war.sideCount; s++)
             for (size_t o = 0; o < r.war.defs.size(); o++)
                 if (r.war.states[o].owner == s && r.war.defs[o].kind == ObjectiveKind::HQ)
-                    for (int q = 0; q < r.config.startSquads; q++)
-                        SpawnSquad(r, s, static_cast<int>(o), true);
+                    for (int type : r.config.startSquads)
+                        SpawnSquad(r, s, static_cast<int>(o), true, type);
         if (Person* player = GWorld->GetRealPlayer())
             for (int s = 0; s < r.war.sideCount; s++)
                 if (r.config.engineSide[s] == player->GetTargetSide())
@@ -1005,12 +1171,52 @@ std::string Describe(const Referee& r, const GroupRecord& rec)
 }
 } // namespace
 
+namespace
+{
+// The human commander's order for these squads: attack or defend the objective at (x, y), or
+// move to the point. Locks them against the AI planner. Returns what was ordered, for the hint.
+std::string OrderRecords(Referee& r, const std::vector<GroupRecord*>& records, float x, float y)
+{
+    const float now = Now();
+    int target = -1;
+    for (size_t o = 0; o < r.war.defs.size(); o++)
+        if (std::hypot(r.war.defs[o].x - x, r.war.defs[o].y - y) <= r.war.defs[o].radius * 1.2f)
+            target = static_cast<int>(o);
+    std::string text;
+    for (GroupRecord* rec : records)
+    {
+        rec->lockedUntil = now + HumanLockSeconds;
+        rec->stalled = false;
+        rec->bestDistance = 1.0e9f;
+        rec->bestAt = now;
+        if (target >= 0)
+        {
+            rec->task = r.war.states[target].owner == r.playerSide ? TaskKind::Defend : TaskKind::Attack;
+            rec->objective = target;
+            Order(*rec, r.war.defs[target], now);
+        }
+        else
+        {
+            rec->task = TaskKind::Move;
+            rec->objective = -1;
+            OrderPoint(*rec, Ground(x, y), now);
+        }
+        rec->selected = false;
+        text += " " + Describe(r, *rec);
+        WarLog("commander: " + Describe(r, *rec) + (target >= 0 ? "" : " move"));
+    }
+    if (target >= 0 && r.war.states[target].owner != r.playerSide && !CanAttack(r.war, r.playerSide, target))
+        text += ". Not on the front yet: it cannot be captured until a neighbouring objective is ours";
+    r.replan[r.playerSide] = true;
+    return text;
+}
+} // namespace
+
 bool MapClick(float x, float y, bool shift, bool alt)
 {
     Referee& r = R();
     if (!r.active || r.playerSide == NoSide)
         return false;
-    const float now = Now();
 
     // A click on one of our squads selects it (Shift adds to the selection); Alt always orders.
     GroupRecord* picked = nullptr;
@@ -1051,39 +1257,255 @@ bool MapClick(float x, float y, bool shift, bool alt)
         Hint("Commander: click one of your squads on the map first.");
         return true;
     }
-
-    int target = -1;
-    for (size_t o = 0; o < r.war.defs.size(); o++)
-        if (std::hypot(r.war.defs[o].x - x, r.war.defs[o].y - y) <= r.war.defs[o].radius * 1.2f)
-            target = static_cast<int>(o);
-    std::string text;
-    for (GroupRecord* rec : selected)
-    {
-        rec->lockedUntil = now + HumanLockSeconds;
-        rec->stalled = false;
-        rec->bestDistance = 1.0e9f;
-        rec->bestAt = now;
-        if (target >= 0)
-        {
-            rec->task = r.war.states[target].owner == r.playerSide ? TaskKind::Defend : TaskKind::Attack;
-            rec->objective = target;
-            Order(*rec, r.war.defs[target], now);
-        }
-        else
-        {
-            rec->task = TaskKind::Move;
-            rec->objective = -1;
-            OrderPoint(*rec, Ground(x, y), now);
-        }
-        rec->selected = false;
-        text += " " + Describe(r, *rec);
-        WarLog("commander: " + Describe(r, *rec) + (target >= 0 ? "" : " move"));
-    }
-    if (target >= 0 && r.war.states[target].owner != r.playerSide && !CanAttack(r.war, r.playerSide, target))
-        text += ". Not on the front yet: it cannot be captured until a neighbouring objective is ours.";
-    Hint("Orders sent:" + text + ". The AI leaves these squads to you for 10 minutes.");
-    r.replan[r.playerSide] = true;
+    Hint("Orders sent:" + OrderRecords(r, selected, x, y) + ". The AI leaves these squads to you for 10 minutes.");
     return true;
+}
+
+namespace
+{
+// Hand the player's control and camera to `person`, the way the engine's own player switch does.
+void TakeBody(Person* person)
+{
+    AIUnit* brain = person ? person->Brain() : nullptr;
+    if (!brain || !GWorld)
+        return;
+    GWorld->SwitchCameraTo(brain->GetVehicle(), CamInternal);
+    GWorld->SetPlayerManual(true);
+    GWorld->SwitchPlayerTo(person);
+    GWorld->SetRealPlayer(person);
+    if (GWorld->UI())
+        GWorld->UI()->ResetVehicle(brain->GetVehicle());
+}
+} // namespace
+
+bool PossessionAllowed()
+{
+    return R().active && R().config.possession;
+}
+
+void SetPossessionAllowed(bool allowed)
+{
+    R().config.possession = allowed;
+}
+
+bool Possessing()
+{
+    const Referee& r = R();
+    return r.active && r.commanderBody && GWorld && GWorld->GetRealPlayer() != r.commanderBody.GetLink();
+}
+
+bool Possess(int groupId, std::string* reason)
+{
+    Referee& r = R();
+    const auto refuse = [&](const char* why)
+    {
+        if (reason)
+            *reason = why;
+        return false;
+    };
+    if (!r.active || r.playerSide == NoSide || !GWorld)
+        return refuse("no war");
+    if (!r.config.possession)
+        return refuse("taking control of soldiers is switched off");
+    for (GroupRecord& rec : r.groups)
+    {
+        AIGroup* grp = rec.group;
+        if (rec.id != groupId || rec.side != r.playerSide || !grp || !grp->Leader())
+            continue;
+        Person* person = grp->Leader()->GetPerson();
+        if (!person || grp->Leader()->GetLifeState() != AIUnit::LSAlive)
+            return refuse("its leader is down");
+        if (!Possessing())
+            r.commanderBody = GWorld->GetRealPlayer();
+        TakeBody(person);
+        WarLog("commander: took control of " + Describe(r, rec));
+        return true;
+    }
+    return refuse("no such squad");
+}
+
+bool ReturnToCommander()
+{
+    Referee& r = R();
+    Person* body = r.commanderBody;
+    if (!body || !body->Brain() || body->Brain()->GetLifeState() != AIUnit::LSAlive)
+        return false;
+    if (GWorld->GetRealPlayer() != body)
+        TakeBody(body);
+    return true;
+}
+
+bool OnRealPlayerDead()
+{
+    Referee& r = R();
+    if (!r.active || !r.commanderBody || !Possessing())
+        return false;
+    if (!ReturnToCommander())
+        return false;
+    WarLog("commander: the soldier you controlled was killed; back in command");
+    r.reopenView = true;
+    return true;
+}
+
+bool TakeReopenViewRequest()
+{
+    const bool want = R().reopenView;
+    R().reopenView = false;
+    return want;
+}
+
+void SetHumanCommander(bool on)
+{
+    R().humanCommander = on;
+}
+
+int PlayerSide()
+{
+    return R().active ? R().playerSide : NoSide;
+}
+
+void ForEachGroup(const std::function<void(const LiveGroup&)>& fn)
+{
+    Referee& r = R();
+    if (!r.active)
+        return;
+    const float now = Now();
+    for (const GroupRecord& rec : r.groups)
+    {
+        AIGroup* grp = rec.group;
+        if (!grp || !grp->Leader())
+            continue;
+        LiveGroup g;
+        g.id = rec.id;
+        g.side = rec.side;
+        g.group = grp;
+        g.task = rec.task;
+        g.objective = rec.objective;
+        g.locked = now < rec.lockedUntil;
+        g.stalled = rec.stalled;
+        g.destX = rec.destination.X();
+        g.destY = rec.destination.Z();
+        if (rec.type >= 0 && rec.type < static_cast<int>(r.config.squads.size()))
+        {
+            const SquadDef& def = r.config.squads[rec.type];
+            g.typeName = def.name;
+            g.role = def.role;
+            g.size = static_cast<int>(def.classes[rec.side].size());
+        }
+        g.playerLed = grp->IsAnyPlayerGroup();
+        fn(g);
+    }
+}
+
+int OrderGroups(const std::vector<int>& ids, float x, float y)
+{
+    Referee& r = R();
+    if (!r.active || r.playerSide == NoSide)
+        return 0;
+    std::vector<GroupRecord*> records;
+    for (GroupRecord& rec : r.groups)
+        if (rec.side == r.playerSide && rec.group && std::find(ids.begin(), ids.end(), rec.id) != ids.end())
+            records.push_back(&rec);
+    if (records.empty())
+        return 0;
+    OrderRecords(r, records, x, y);
+    return static_cast<int>(records.size());
+}
+
+std::vector<SquadInfo> SquadTypes()
+{
+    std::vector<SquadInfo> out;
+    const Referee& r = R();
+    if (!r.active || r.playerSide == NoSide)
+        return out;
+    for (const SquadDef& def : r.config.squads)
+        out.push_back({def.name, def.cost, static_cast<int>(def.classes[r.playerSide].size())});
+    return out;
+}
+
+bool CanBuy(int base, int type, std::string* reason)
+{
+    const Referee& r = R();
+    const auto refuse = [&](const char* why)
+    {
+        if (reason)
+            *reason = why;
+        return false;
+    };
+    if (!r.active || r.playerSide == NoSide)
+        return refuse("no war");
+    if (type < 0 || type >= static_cast<int>(r.config.squads.size()))
+        return refuse("no such squad");
+    const SquadDef& def = r.config.squads[type];
+    if (!SpawnEligible(r.war, r.playerSide, base, Now(), r.tuning, reason))
+        return false;
+    if (r.war.pool[r.playerSide] < def.cost)
+        return refuse("not enough supplies");
+    if (r.live[r.playerSide] + static_cast<int>(def.classes[r.playerSide].size()) > r.config.cap)
+        return refuse("manpower cap reached");
+    return true;
+}
+
+int BuySquad(int base, int type, std::string* reason)
+{
+    Referee& r = R();
+    if (!CanBuy(base, type, reason))
+        return 0;
+    const int id = SpawnSquad(r, r.playerSide, base, false, type);
+    if (!id)
+    {
+        if (reason)
+            *reason = "the squad could not be created";
+        return 0;
+    }
+    // A squad the commander bought waits at its base for orders, like a factory's output.
+    for (GroupRecord& rec : r.groups)
+        if (rec.id == id)
+        {
+            rec.task = TaskKind::Defend;
+            rec.objective = base;
+            rec.lockedUntil = Now() + HumanLockSeconds;
+        }
+    WarLog("commander: bought a " + r.config.squads[type].name + " at " + r.war.defs[base].name);
+    return id;
+}
+
+int SquadTypeIndex(const std::string& id)
+{
+    const Referee& r = R();
+    for (size_t t = 0; t < r.config.squads.size(); t++)
+        if (_stricmp(r.config.squads[t].id.c_str(), id.c_str()) == 0 ||
+            _stricmp(r.config.squads[t].name.c_str(), id.c_str()) == 0)
+            return static_cast<int>(t);
+    return -1;
+}
+
+std::vector<Contact> KnownEnemies(int side)
+{
+    std::vector<Contact> out;
+    const Referee& r = R();
+    if (!r.active || side == NoSide || !GWorld)
+        return out;
+    AICenter* center = GWorld->GetCenter(r.config.engineSide[side]);
+    if (!center)
+        return out;
+    for (int t = 0; t < center->NTargets(); t++)
+    {
+        const AITargetInfo& info = center->GetTarget(t);
+        if (info._destroyed || info._vanished || !center->IsEnemy(info._side))
+            continue;
+        const float age = Glob.time - info._time;
+        if (age > KnowledgeAgeSeconds)
+            continue;
+        Contact c;
+        c.x = info._pos.X();
+        c.y = info._pos.Z();
+        c.height = info._pos.Y();
+        c.age = age;
+        c.vehicle = info._type && !info._type->IsKindOf(GWorld->Preloaded(VTypeMan));
+        out.push_back(c);
+    }
+    return out;
 }
 
 std::string StatusText()
@@ -1134,8 +1556,46 @@ static GameValue ConquestMapClickUnary(const GameState*, GameValuePar oper1)
     return GameValue(Poseidon::Conquest::MapClick(static_cast<float>(pos[0]), static_cast<float>(pos[1]), shift, alt));
 }
 
+// conquestBuy ["Morton", "Motorised"]: the player's side buys that squad type (config class name)
+// at that objective (its name). Returns the new squad's id, or the reason it was refused.
+static GameValue ConquestBuyUnary(const GameState*, GameValuePar oper1)
+{
+    using namespace Poseidon::Conquest;
+    const GameArrayType& a = oper1;
+    if (a.Size() < 2 || a[0].GetType() != GameString || a[1].GetType() != GameString)
+        return GameValue(RString("usage: conquestBuy [objective, squad type]"));
+    const std::string base = static_cast<const char*>(RString(a[0]));
+    const std::string type = static_cast<const char*>(RString(a[1]));
+    const Snapshot& snap = GetSnapshot();
+    int baseIndex = -1;
+    for (size_t o = 0; o < snap.war.defs.size(); o++)
+        if (_stricmp(snap.war.defs[o].name.c_str(), base.c_str()) == 0)
+            baseIndex = static_cast<int>(o);
+    const int typeIndex = SquadTypeIndex(type);
+    if (baseIndex < 0 || typeIndex < 0)
+        return GameValue(RString("unknown objective or squad type"));
+    std::string why;
+    const int id = BuySquad(baseIndex, typeIndex, &why);
+    return id ? GameValue(static_cast<float>(id)) : GameValue(RString(why.c_str()));
+}
+
+// conquestTakeControl id: the player takes over the leader of their side's squad `id`
+// (conquestCommanderView true brings them back). True, or the reason it was refused.
+static GameValue ConquestTakeControlUnary(const GameState*, GameValuePar oper1)
+{
+    std::string why;
+    if (Poseidon::Conquest::Possess(static_cast<int>(static_cast<float>(oper1)), &why))
+    {
+        Poseidon::Conquest::View::SetActive(false); // as the HUD's "Take control" does: the soldier's eyes
+        return GameValue(true);
+    }
+    return GameValue(RString(why.c_str()));
+}
+
 INIT_MODULE(ConquestReferee, 3)
 {
+    GGameState.NewFunction(GameFunction(GameAny, "conquestTakeControl", ConquestTakeControlUnary, GameScalar));
+    GGameState.NewFunction(GameFunction(GameAny, "conquestBuy", ConquestBuyUnary, GameArray));
     GGameState.NewNularOp(GameNular(GameString, "conquestState", ConquestStateNular));
     GGameState.NewFunction(GameFunction(GameBool, "conquestMapClick", ConquestMapClickUnary, GameArray));
 };

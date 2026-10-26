@@ -51,7 +51,7 @@ bool CanAttack(const War& war, int side, int index)
 
 float CaptureSeconds(float strength, const Tuning& tuning)
 {
-    const float factor = std::clamp(strength / 4.0f, 0.5f, 2.0f);
+    const float factor = std::clamp(strength / 4.0f, 0.5f, MaxCaptureFactor);
     return tuning.baseCaptureSeconds / factor;
 }
 

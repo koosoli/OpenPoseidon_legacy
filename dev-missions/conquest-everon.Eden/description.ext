@@ -1,4 +1,4 @@
-// Conquest, Slice 0: an NPC-only war on Everon (docs/roadmap/conquest/CONQUEST-PLAN.md).
+// Conquest on Everon (docs/roadmap/conquest/CONQUEST-PLAN.md).
 // The referee (engine/Poseidon/Game/Conquest) reads this class; without it the engine does nothing.
 // Positions are CfgWorlds >> Eden >> Names (map metres, x east, y north); the airfield is its ilsPosition.
 
@@ -6,15 +6,64 @@ class CfgConquest
 {
     sides[] = {"WEST", "EAST"};
     startPool = 300;   // each side, on top of its starting squads
-    startSquads = 3;   // free squads at each HQ when the war begins
+    startSquads[] = {"Motorised", "Rifle", "Recon"}; // free, at each HQ when the war begins
     cap = 60;          // living soldiers per side
-    squadCost = 80;
     planSeconds = 20;  // the commanders replan this often, and at once on a capture
 
-    class Rosters
+    // What a side can buy. <SIDE>[] are the soldiers, <SIDE>vehicles[] spawn empty beside them and
+    // belong to the squad: it mounts for moves over 200 m and gets out near its destination.
+    // role tells the AI commanders when to buy it (foot, motorised, mechanised, air). The first
+    // class is the AI's default rifle squad.
+    class Squads
     {
-        WEST[] = {"OfficerW", "SoldierWB", "SoldierWMG", "SoldierWB", "SoldierWLAW", "SoldierWB", "SoldierWMedic", "SoldierWB"};
-        EAST[] = {"OfficerE", "SoldierEB", "SoldierEMG", "SoldierEB", "SoldierELAW", "SoldierEB", "SoldierEMedic", "SoldierEB"};
+        class Rifle
+        {
+            name = "Rifle squad";
+            cost = 80;
+            role = "foot";
+            WEST[] = {"OfficerW", "SoldierWB", "SoldierWMG", "SoldierWB", "SoldierWLAW", "SoldierWB", "SoldierWMedic", "SoldierWB"};
+            EAST[] = {"OfficerE", "SoldierEB", "SoldierEMG", "SoldierEB", "SoldierELAW", "SoldierEB", "SoldierEMedic", "SoldierEB"};
+        };
+        class Motorised
+        {
+            name = "Motorised squad";
+            cost = 130;
+            role = "motorised";
+            WEST[] = {"OfficerW", "SoldierWB", "SoldierWMG", "SoldierWB", "SoldierWLAW", "SoldierWB", "SoldierWMedic", "SoldierWB"};
+            EAST[] = {"OfficerE", "SoldierEB", "SoldierEMG", "SoldierEB", "SoldierELAW", "SoldierEB", "SoldierEMedic", "SoldierEB"};
+            WESTvehicles[] = {"Truck5tOpen"};
+            EASTvehicles[] = {"Ural"};
+        };
+        class Recon
+        {
+            name = "Recon jeep";
+            cost = 70;
+            role = "motorised";
+            WEST[] = {"SoldierWB", "SoldierWMG", "SoldierWLAW", "SoldierWB"};
+            EAST[] = {"SoldierEB", "SoldierEMG", "SoldierELAW", "SoldierEB"};
+            WESTvehicles[] = {"Jeep"};
+            EASTvehicles[] = {"UAZ"};
+        };
+        class Mechanised
+        {
+            name = "Mechanised squad";
+            cost = 220;
+            role = "mechanised";
+            WEST[] = {"SoldierWCrew", "SoldierWCrew", "SoldierWB", "SoldierWMG", "SoldierWLAW", "SoldierWB", "SoldierWB", "SoldierWMedic"};
+            EAST[] = {"SoldierECrew", "SoldierECrew", "SoldierEB", "SoldierEMG", "SoldierELAW", "SoldierEB", "SoldierEB", "SoldierEMedic"};
+            WESTvehicles[] = {"M113"};
+            EASTvehicles[] = {"BMP"};
+        };
+        class AirAssault
+        {
+            name = "Air assault squad";
+            cost = 260;
+            role = "air";
+            WEST[] = {"SoldierWPilot", "OfficerW", "SoldierWB", "SoldierWMG", "SoldierWLAW", "SoldierWB", "SoldierWB", "SoldierWMedic"};
+            EAST[] = {"SoldierEPilot", "OfficerE", "SoldierEB", "SoldierEMG", "SoldierELAW", "SoldierEB", "SoldierEB", "SoldierEMedic"};
+            WESTvehicles[] = {"UH60"};
+            EASTvehicles[] = {"Mi17"};
+        };
     };
 
     class Objectives

@@ -129,8 +129,9 @@ Every number below is a config value and a **first guess, to be tuned from Slice
   the objective is *contested* and progress freezes. Why 2:1 and not "any enemy freezes it": under that rule, one
   AI soldier stuck in a house holds off a whole squad indefinitely, which is both an exploit and a classic AI
   stalemate.
-- Rate: a full bar takes `90 s / clamp(strength / 4, 0.5, 2)`, i.e. 45 s for an eight-man squad and 180 s for two
-  men. Piling on more troops cannot beat the 2× cap.
+- Rate: a full bar takes `90 s / clamp(strength / 4, 0.5, 6)`: 180 s for two men, 45 s for an eight-man squad,
+  22.5 s for two squads and 15 s from three squads on (owner, 2026-10-26: more soldiers capture faster). Beyond 24
+  soldiers it gets no faster, so no blob takes a town instantly.
 - An owned objective must first be **neutralised** (bar to zero), then filled for the new owner, so a full capture
   against a defender takes twice as long. Progress left behind decays back at a quarter of the rate.
 - On capture: the flag and marker change, income starts next tick, and spawning there unlocks after a 60 s settle.
@@ -478,3 +479,33 @@ Built on `claude/domination-mode-ccede5` (base `perf/reforger-render-hitches` `d
   Verified through the harness; not yet played by hand.
 - **Changed from the plan:** guarded points are not used yet (the Standard commander's own defence logic was
   enough), so the guarded-point removal was not needed for Slice 0.
+
+## Status, 2026-10-26: the commander view, vehicles, taking control
+
+At the owner's request (2026-10-25/26), ahead of the slice order:
+
+- **The commander view (Ctrl+M)** is a top-down strategy screen over the live war (`Game/Conquest/ConquestView.*`).
+  Controls: WASD or the screen edge pan, the wheel zooms, and Q/E or the middle mouse button turn. Left click or a
+  dragged box selects squads; right click orders them (an objective: attack or defend it; a known enemy: engage it;
+  the ground: move there). It has its own player-facing look (Bahnschrift and Segoe UI, dark glass cards, side
+  colours), not the dev style:
+  - a top bar with the side's supplies and income, objectives, soldiers and the cap, both war scores and the clock;
+  - squad cards with callsigns (Alpha, Bravo ...), type, task and strength pips;
+  - deploy tiles per base, with price and the reason a squad cannot be bought;
+  - key-cap hints and order toasts.
+  Enemies show only as the side knows them, fading with age. While the view is open, the AI stops buying for the
+  player's side, so the supplies are the player's; the AI keeps running every squad the player has not ordered.
+- **Vehicles:** `class Squads` in CfgConquest defines what a side can buy, with `<SIDE>vehicles[]` per type. Everon
+  has the rifle squad, motorised squad (truck), recon jeep, mechanised squad (M113 / BMP) and air assault squad
+  (UH-60 / Mi-17). A squad mounts for moves over 200 m and dismounts near its destination. The AI buys by distance to
+  the front: air beyond 2.5 km, motorised beyond 900 m, armour when rich. Figari now falls after about 3–4 game
+  minutes instead of 9.
+- **Squads move independently:** spare squads spread over the best three front targets, each to the one furthest
+  short of its need, instead of one column to one town.
+- **Taking control (optional: `possession = 0` or the HUD switch):** "Take control" puts the player in the selected
+  squad leader's body. Ctrl+M returns to command, and that soldier goes back to the AI. If the soldier dies, the
+  player is back in command instead of the mission ending (the single-player death check asks
+  `Conquest::OnRealPlayerDead`).
+- **Capture speed rises with numbers:** `90 s / clamp(strength / 4, 0.5, 6)`.
+- New script commands: `conquestCommanderView`, `conquestBuy [base, type]`, `conquestTakeControl id`.
+- Verified through the harness (captures in `build/conquest-runs/`, not committed); not yet played by hand.

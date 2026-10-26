@@ -1,4 +1,5 @@
 #include <Poseidon/World/Simulation/DynamicSimulation.hpp>
+#include <Poseidon/Game/Conquest/ConquestReferee.hpp>
 #include <Poseidon/World/Terrain/CraterField.hpp>
 #include <Poseidon/World/Effects/BuildingBreach.hpp>
 #include <Poseidon/Core/Global.hpp>
@@ -621,6 +622,10 @@ void World::PerformAI(float deltaT, float noAccDeltaT)
                         AIUnit* unit = veh ? veh->Brain() : nullptr;
                         if (!unit || unit->GetLifeState() == AIUnit::LSDead)
                         {
+                            // Conquest: the soldier the commander had taken over died; the player is
+                            // back in their own body and command, and the war goes on.
+                            if (Poseidon::Conquest::OnRealPlayerDead())
+                                return;
                             _endMission = EMKilled;
                             return;
                         }

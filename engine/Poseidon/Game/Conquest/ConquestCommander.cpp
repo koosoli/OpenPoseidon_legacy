@@ -236,14 +236,30 @@ std::vector<Intent> PlanStandard(const SideView& view, const CommanderTuning& tu
     if (secondary >= 0)
         fill(secondary, TaskKind::Attack, attackNeed(secondary), "second effort");
 
-    // 4. Whoever is left: fit groups join the main effort, worn-out ones hold the nearest base.
+    // 4. Whoever is left: fit groups spread over the best targets on the front -- each to the
+    // one whose force falls furthest short of its need -- so squads work apart instead of
+    // marching in one column to one town. Worn-out ones hold the nearest base.
+    const size_t spread = std::min<size_t>(targets.size(), 3);
     for (Slot& slot : slots)
     {
         if (slot.task != TaskKind::None || slot.group->locked)
             continue;
-        if (primary >= 0 && slot.group->men > tuning.depletedMen)
+        if (spread > 0 && slot.group->men > tuning.depletedMen)
         {
-            assign(slot, TaskKind::Attack, primary, "reinforcing the main effort");
+            int best = targets[0].first;
+            float bestShare = std::numeric_limits<float>::max();
+            for (size_t t = 0; t < spread; t++)
+            {
+                const int o = targets[t].first;
+                const float share = force[o] / attackNeed(o);
+                if (share < bestShare)
+                {
+                    bestShare = share;
+                    best = o;
+                }
+            }
+            assign(slot, TaskKind::Attack, best, best == primary ? "reinforcing the main effort" : "widening the front");
+            force[best] += static_cast<float>(slot.group->men);
             continue;
         }
         int nearest = -1;

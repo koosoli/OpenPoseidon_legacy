@@ -18,6 +18,9 @@
 namespace Poseidon::Conquest
 {
 constexpr int MaxSides = 3;
+// Capture speeds up with every soldier in the zone (owner, 2026-10-26) up to 24 of them: more
+// than that changes nothing, so no blob takes a town instantly.
+constexpr float MaxCaptureFactor = 6.0f;
 constexpr int NoSide = -1;
 
 enum class ObjectiveKind
@@ -107,7 +110,8 @@ int OwnedCount(const War& war, int side, bool countHQs = true);
 /// An HQ is also protected while its owner still holds any other objective.
 bool CanAttack(const War& war, int side, int index);
 
-/// Seconds for a full bar at this strength: baseCaptureSeconds / clamp(strength / 4, 0.5, 2).
+/// Seconds for a full bar at this strength: baseCaptureSeconds / clamp(strength / 4, 0.5, 6),
+/// i.e. 45 s for a squad of eight, 22.5 s for two squads, 15 s from three squads on.
 float CaptureSeconds(float strength, const Tuning& tuning);
 
 /// The side whose strength is at least dominanceRatio times every other side present, or NoSide

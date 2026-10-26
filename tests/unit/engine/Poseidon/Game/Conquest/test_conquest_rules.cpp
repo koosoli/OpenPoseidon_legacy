@@ -2,6 +2,9 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <set>
+#include <string>
+
 #include <Poseidon/Game/Conquest/ConquestCommander.hpp>
 #include <Poseidon/Game/Conquest/ConquestRules.hpp>
 
@@ -64,7 +67,8 @@ TEST_CASE("conquest: a squad captures a neutral objective on its front in 45 s",
     float now = 0.0f;
     CHECK(CaptureSeconds(8.0f, Tuning()) == Catch::Approx(45.0f));
     CHECK(CaptureSeconds(2.0f, Tuning()) == Catch::Approx(180.0f));
-    CHECK(CaptureSeconds(100.0f, Tuning()) == Catch::Approx(45.0f)); // piling on is capped
+    CHECK(CaptureSeconds(16.0f, Tuning()) == Catch::Approx(22.5f)); // more soldiers, faster
+    CHECK(CaptureSeconds(100.0f, Tuning()) == Catch::Approx(15.0f)); // but only up to 24 of them
     Hold(war, 1, Men(8, 0), 44.0f, now);
     CHECK(war.states[1].owner == NoSide);
     const CaptureResult r = Hold(war, 1, Men(8, 0), 2.0f, now);
@@ -284,4 +288,37 @@ TEST_CASE("conquest commander: a captured objective keeps one garrison, the rest
             attackingB++;
     }
     CHECK(attackingB == 2);
+}
+
+TEST_CASE("conquest commander: spare squads spread over the front instead of one column", "[conquest]")
+{
+    // A star: side 0 holds the centre (with its HQ behind it) and may attack three neutral towns.
+    War war;
+    war.sideCount = 2;
+    const float pos[5][2] = {{0, 0}, {0, 1000}, {1000, 1000}, {0, 2000}, {-1000, 1000}};
+    for (int i = 0; i < 5; i++)
+    {
+        ObjectiveDef d;
+        d.name = "O" + std::to_string(i);
+        d.x = pos[i][0];
+        d.y = pos[i][1];
+        d.kind = i == 0 ? ObjectiveKind::HQ : ObjectiveKind::Town;
+        war.defs.push_back(d);
+    }
+    war.defs[0].neighbours = {1};
+    war.defs[1].neighbours = {0, 2, 3, 4};
+    war.defs[2].neighbours = {1};
+    war.defs[3].neighbours = {1};
+    war.defs[4].neighbours = {1};
+    war.defs[0].initialOwner = 0;
+    war.defs[1].initialOwner = 0;
+    StartWar(war, Tuning(), 0.0f);
+    SideView v = ViewOf(war, 0);
+    for (int g = 1; g <= 6; g++)
+        v.groups.push_back({g, 0.0f, 1000.0f, 8, TaskKind::None, -1, false});
+    std::set<int> targets;
+    for (const Intent& i : PlanStandard(v, CommanderTuning()))
+        if (i.kind == Intent::Kind::Assign && i.task == TaskKind::Attack)
+            targets.insert(i.objective);
+    CHECK(targets.size() == 3);
 }

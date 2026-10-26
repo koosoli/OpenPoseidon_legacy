@@ -61,6 +61,7 @@
 #include <Poseidon/Dev/Diag/PictureModeTab.hpp>
 #include <Poseidon/Dev/Diag/WeatherTab.hpp>
 #include <Poseidon/Dev/Diag/ConquestTab.hpp>
+#include <Poseidon/Game/Conquest/ConquestView.hpp>
 #include <Poseidon/Dev/Diag/SmokeTab.hpp>
 #include <Poseidon/Dev/Diag/AudioTab.hpp>
 #include <Poseidon/Dev/Debug/DevPanelHome.hpp>
@@ -8284,6 +8285,13 @@ void ProcessEvent(const SDL_Event& event)
         return;
     s_zeusConsumeMouseEvent = false;
     s_zeusConsumeKeyboardEvent = false;
+    // The Conquest commander view (Ctrl+M) owns the mouse and keyboard while it is up; ImGui
+    // still sees the event, because the view's HUD is ImGui windows.
+    if (Poseidon::Conquest::View::ProcessEvent(event))
+    {
+        ImGui_ImplSDL3_ProcessEvent(&event);
+        return;
+    }
     if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) s_terrainBrushDragging = false;
     if (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED && s_zeusCamera && !s_visible)
     {
@@ -8605,6 +8613,7 @@ void NewFrame()
     // hands: without this the search could only ever be checked by a person.
     if (s_visible || Dev::PanelSearchPreseeded())
         DrawMainWindow();
+    Poseidon::Conquest::View::Frame();
     Poseidon::NpcChat::DrawOverlay(s_visible);
 }
 
@@ -8731,6 +8740,8 @@ bool WantsKeyboard()
 {
     if (MultiplayerSession())
         return false;
+    if (s_initialized && Poseidon::Conquest::View::WantsKeyboard())
+        return true;
     if (s_initialized && Poseidon::NpcChat::WantsKeyboard())
         return true;
     if (!s_initialized || (!s_visible && !s_zeusConsumeKeyboardEvent))
@@ -8753,7 +8764,7 @@ bool WantsMouse()
         return false;
     if (!s_initialized)
         return false;
-    if (s_zeusConsumeMouseEvent)
+    if (s_zeusConsumeMouseEvent || Poseidon::Conquest::View::WantsMouse())
         return true;
     if (!s_visible)
         return false;
