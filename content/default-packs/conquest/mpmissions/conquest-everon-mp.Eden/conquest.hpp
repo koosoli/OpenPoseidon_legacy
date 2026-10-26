@@ -8,7 +8,7 @@ class CfgConquest
     // says so; otherwise its base is one more neutral village.
     sides[] = {"WEST", "EAST", "GUER"};
     resistance = 0;
-    startPool = 500;   // each side, on top of its starting squads (the setup screen sets each side's)
+    startPool = 2000;  // each side, on top of its starting squads (the setup screen sets each side's)
     // Free, at each HQ when the war begins: three squads, two tanks, a helicopter with its squad and a
     // supply truck.
     startSquads[] = {"Motorised", "Rifle", "Recon", "Armour", "Armour", "AirAssault", "Supply"};
