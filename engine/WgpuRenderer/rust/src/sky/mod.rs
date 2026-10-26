@@ -78,6 +78,28 @@ fn sky_wgsl_validates_with_cloud_ms() {
     }
 }
 
+// CLOUD-DECK (default; WGR_CLOUD_DECK=0 = off): the two-stream deck term validates with and without CLOUD_MS and WHOLE_WORLD.
+#[test]
+fn sky_wgsl_validates_with_cloud_deck() {
+    for mask in 0u32..4 {
+        let mut composer=crate::shaders::build_composer();
+        let mut defs=crate::shaders::shader_defs();
+        defs.insert("CLOUD_DECK".to_string(),naga_oil::compose::ShaderDefValue::Bool(true));
+        if mask & 1 == 0 { defs.remove("CLOUD_MS"); }
+        if mask & 2 == 0 { defs.remove("WHOLE_WORLD"); }
+        let module=composer.make_naga_module(naga_oil::compose::NagaModuleDescriptor {
+            source:include_str!("sky.wgsl"),file_path:"sky/sky.wgsl",shader_defs:defs,..Default::default()
+        }).unwrap_or_else(|e|panic!("compose sky with CLOUD_DECK (mask {mask}): {}",e.emit_to_string(&composer)));
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(),naga::valid::Capabilities::all())
+            .validate(&module)
+            .unwrap_or_else(|e|panic!("sky.wgsl with CLOUD_DECK (mask {mask}) fails validation: {e:?}"));
+        assert!(format!("{module:?}").contains("deck_td"),"CLOUD_DECK did not compile in");
+    }
+    if std::env::var("WGR_CLOUD_DECK").as_deref()!=Ok("0") {
+        assert!(crate::shaders::shader_defs().contains_key("CLOUD_DECK"),"CLOUD_DECK is not on by default");
+    }
+}
+
 // Guards every sky.wgsl edit: parse + validate the module offline so a WGSL error
 // surfaces in CI/tests instead of as a pipeline-creation panic at runtime.
 #[test]
@@ -3025,6 +3047,13 @@ impl Sky {
         // (sky.wgsl earth_aerial), which a clear sky needs as much as a cloudy one.
         let earth_aerial = sky.cloud4[3] > 0.5 && sky.night_zenith[3] > 12000.0;
         self.linear > 0.5 && (sky.cloud0[0] > 0.001 || earth_aerial)
+    }
+
+    /// Whether every cloud lies beyond the sea's surface from this camera: below half the deck's
+    /// base no ray meets cloud before a wave, so lib.rs composites the clouds before the water.
+    /// Not for the whole world (its planet clouds and the air in front of the globe).
+    pub fn clouds_behind_water(&self, sky: &WgrSky) -> bool {
+        sky.cloud4[3] <= 0.5 && sky.night_zenith[3] < sky.cloud0[2] * 0.5
     }
 
     pub fn cloud_temporal_view(&self) -> Option<&wgpu::TextureView> {

@@ -37,6 +37,63 @@
 
 const FFT_SIZE: f32 = 256.0;
 const CASCADES: i32 = 4;
+// SEA-GLINTS: sparkles ADDED to the whole smooth highlight (owner, 2026-10-26: "i can no really see
+// much glitter"). The energy-conserving version took GLINT_SHARE of the lobe from every pixel and gave
+// it back to the few a facet lit, which at any share read as the path dimmed and etched with dark
+// rims, not as glitter. Now: the finest facet cell (m), a facet's glint tolerance in units of the
+// capillary slope spread, its radius in cells, a glint's peak over the smooth path's own peak (above 1
+// the tone curve clips it white, as the eye sees the sun in a facet), and the capillary slope spread
+// floor: facets are tilted by ripples finer than the resolved waves, so the sparkles spread past the
+// smooth path into a halo round it.
+const GLINT_CELL: f32 = 0.05;
+const GLINT_TOL: f32 = 0.4;
+const GLINT_RADIUS: f32 = 0.35;
+const GLINT_PEAK: f32 = 8.0;
+const GLINT_CAPILLARY: f32 = 0.09;
+// integer hashes (Jarzynski & Olano 2020, pcg3d / pcg4d): a handful of integer ops where the
+// sin-based hash cost a sin each, and a facet needs eleven random numbers
+fn glintPcg3(v0: vec3<u32>) -> vec3<f32> {
+    var v = v0 * 1664525u + 1013904223u;
+    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+    v ^= v >> vec3<u32>(16u);
+    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+    return vec3<f32>(v >> vec3<u32>(8u)) * (1.0 / 16777216.0);
+}
+fn glintPcg4(v0: vec4<u32>) -> vec4<f32> {
+    var v = v0 * 1664525u + 1013904223u;
+    v.x += v.y * v.w; v.y += v.z * v.x; v.z += v.x * v.y; v.w += v.y * v.z;
+    v ^= v >> vec4<u32>(16u);
+    v.x += v.y * v.w; v.y += v.z * v.x; v.z += v.x * v.y; v.w += v.y * v.z;
+    return vec4<f32>(v >> vec4<u32>(8u)) * (1.0 / 16777216.0);
+}
+const GLINT_RATE: f32 = 3.0;
+// the glint of the facet in this pixel's cell of size `cell` (octave `lvl`), 0..1: `need` is the
+// tilt that mirrors the sun, `sig` the facets' slope spread, `fp` the footprint (m)
+fn glintFacet(xz: vec2<f32>, cell: f32, lvl: u32, need: vec2<f32>, sig: f32, fp: f32) -> f32 {
+    let cf = floor(xz / cell);
+    let cu = bitcast<vec2<u32>>(vec2<i32>(cf));
+    let h = glintPcg3(vec3<u32>(cu, lvl * 0x9E37u + 17u));
+    let centre = (cf + 0.4 + 0.2 * h.xy) * cell;
+    let r = GLINT_RADIUS * cell;
+    // the share of the pixel the facet disc covers: a soft disc whose edge widens with the footprint
+    let d = length(xz - centre);
+    let cover = clamp((r + 0.5 * fp - d) / max(fp, 1e-4), 0.0, 1.0) * min(r * r / max(0.25 * fp * fp, 1e-8), 1.0);
+    // the facet's tilt, re-drawn GLINT_RATE times a second and blended between draws so it drifts:
+    // each draw two sums of two uniforms (triangular, scaled to unit variance)
+    let tt = frame.ground_weather.w * GLINT_RATE + h.z;
+    let ti = u32(max(floor(tt), 0.0));
+    let tf = smoothstep(0.0, 1.0, fract(tt));
+    let q0 = glintPcg4(vec4<u32>(cu, ti, lvl));
+    let q1 = glintPcg4(vec4<u32>(cu, ti + 1u, lvl));
+    let d0 = vec2<f32>(q0.x + q0.y - 1.0, q0.z + q0.w - 1.0) * 2.449;
+    let d1 = vec2<f32>(q1.x + q1.y - 1.0, q1.z + q1.w - 1.0) * 2.449;
+    // two draws blended lose variance mid-way; restore it
+    let tilt = mix(d0, d1, tf) / sqrt((1.0 - tf) * (1.0 - tf) + tf * tf);
+    let tau = GLINT_TOL * sig;
+    let off = tilt * sig - need;
+    // how well the facet mirrors the sun into the eye, times the share of the pixel it covers
+    return exp(-dot(off, off) / (2.0 * tau * tau)) * cover;
+}
 
 override linear: f32 = 1.0;
 
@@ -76,6 +133,24 @@ struct OceanParams {
 // grid, placed by (origin x, origin z, cell, samples a side; 0 = none).
 @group(1) @binding(28) var farFloorTex: texture_2d<f32>;
 @group(1) @binding(29) var<uniform> farFloor: vec4<f32>;
+#ifdef TW_FOAM2
+// TW-FOAM2: the FFT foam buffer, N x N x cascades persistent foam then the same for active breaking
+@group(1) @binding(30) var<storage, read> oceanFoamBuf: array<f32>;
+// active breaking of cascade c at a world point, bilinear and periodic like the FFT textures
+fn activeFoamAt(xz: vec2<f32>, c: i32) -> f32 {
+    let n = i32(FFT_SIZE);
+    let st = xz / ocean.sizes[c].x * FFT_SIZE - 0.5;
+    let i0 = vec2<i32>(floor(st));
+    let f = st - floor(st);
+    let base = (n * n) * (CASCADES + c);
+    var v = array<f32, 4>();
+    for (var k = 0; k < 4; k++) {
+        let q = ((i0 + vec2<i32>(k & 1, k >> 1)) % n + n) % n;
+        v[k] = oceanFoamBuf[base + q.y * n + q.x];
+    }
+    return mix(mix(v[0], v[1], f.x), mix(v[2], v[3], f.x), f.y);
+}
+#endif
 
 // Earth presentation belongs to the material: the wake kernel also consumes
 // tw_common.wgsl, but deliberately has no TwSurface binding.
@@ -547,7 +622,21 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
     // (2026-10-13). OP keeps one departure the owner asked for: no windrow lines (Tidewater adds
     // det.streak * 0.5 here, drawn as thin white lines across the sea in fresh wind).
     let fresh = sat((ocean.p0.y - 0.15 - jac) * 2.0);
+#ifdef TW_FOAM2
+    // (OP, TW-FOAM2) the cap is where the crest breaks NOW: the active field (~0.4 s) of the two
+    // whitecap cascades (x3: it settles at about a third of the persistent foam's level); the
+    // persistent foam, seconds old, goes to the lace below instead of keeping the cap solid.
+    // Close to the eye only: beyond 0.8 m pixels (a cap is a few pixels there) the plain per-vertex
+    // foam carries the caps -- the 8 buffer reads are paid only where a cap's core and rim resolve.
+    let activeNear = 1.0 - smoothstep(0.3, 0.8, footprint);
+    var activeFoam = 0.0;
+    if (activeNear > 0.0) {
+        activeFoam = (activeFoamAt(lagXZ, 1) * 0.45 + activeFoamAt(lagXZ, 2) * 0.5) * 3.0;
+    }
+    var whitecaps = mix(vertexFoam, activeFoam, activeNear) + fresh;
+#else
     var whitecaps = vertexFoam + fresh;
+#endif
     whitecaps = whitecaps * mix(0.5, 1.5, det.gust);
     var capCover = whitecaps * tw.surface.z;
     // OP: whitecaps as patches on the crests (see water_tw::WHITECAP_PATCH): the low foam a rough
@@ -562,7 +651,12 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
     }
     let coverage = sat(foamSum * tw.surface.z + capCover);
     // the cover the lace pattern below draws: everything but the caps in patch mode
+#ifdef TW_FOAM2
+    // (TW-FOAM2) the old foam the caps no longer hold opens up into the lace
+    let laceCover = select(coverage, sat((foamSum + vertexFoam * activeNear) * tw.surface.z), capPatches);
+#else
     let laceCover = select(coverage, sat(foamSum * tw.surface.z), capPatches);
+#endif
 
     let fuv = lagXZ * tw.surface.w;
     let p1 = textureSample(waterFoamTex, smpAniso4Repeat, fuv);
@@ -923,9 +1017,22 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
     // passing over a swimmer's eye turned the whole distant sea, seen through that crest from above,
     // into the view from below: total internal reflection, the water's own teal in-scatter, a teal band
     // along the horizon at the waterline (owner's "turquoise in high waves").
-    let farFromBelow = camH < 0.0 && pos.y > frame.cam_pos.y;
+    // (OP, 2026-10-26) ...but "above the eye" is not the test: the water writes no depth, so every layer
+    // of surface along a ray is drawn, and with a big wave over the camera the line between the two
+    // shadings ran dead straight across the frame at eye level (owner: "big waves ... still not where it
+    // needs to go"). A point is seen from below when the view ray goes up through it, along the surface's
+    // own (smooth) normal: the crest's underside over the eye, and not the sea the ray reaches past it.
+    let farFromBelow = camH < 0.0 && dot(rel, surf.normal) > 0.0;
     let viewFromBelow = select(farFromBelow, !seenFromAbove, nearSurface && !folded);
     let Nup = surf.normal;
+#ifdef SEA_SPECAA
+    // (OP, SEA-SPECAA) the cost-free part of LEAN (open-water's water.js, after Kaplanyan & Hoffman
+    // 2016): the spread of normals inside the pixel footprint is slope variance the sun lobe must
+    // carry, or sub-pixel ripples alias into crawling hairlines; taken here in uniform control flow
+    let aaNx = dpdx(Nup);
+    let aaNy = dpdy(Nup);
+    let specAA = min(0.5 * (dot(aaNx, aaNx) + dot(aaNy, aaNy)), 0.08);
+#endif
     let Nside = select(Nup, -Nup, viewFromBelow);
     let Nview = normalize(Nside + V * max(-dot(Nside, V) + 0.03, 0.0));
 
@@ -1003,8 +1110,51 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         let NdH = max(dot(N, H), 0.0);
         let VdH = max(dot(V, H), 0.0);
         let Fs = fresnelDielectric(VdH, IOR);
+#ifdef SEA_SPECAA
+        // ... capped at the sea's whole slope variance (alpha^2 ~ 2 mss), so the glitter path keeps
+        // narrowing toward the horizon instead of widening with the footprint
+        let alphaSun = min(alpha2 + 2.0 * specAA, max(alpha2, 2.0 * mss));
+        let spec = _waterDGGX(NdH, alphaSun) * _waterVSmithGGX(NdL, NdV, alphaSun) * Fs * NdL;
+#else
         let spec = _waterDGGX(NdH, alpha2) * _waterVSmithGGX(NdL, NdV, alpha2) * Fs * NdL;
+#endif
+#ifdef SEA_GLINTS
+        // (OP, SEA-GLINTS) the sun's glitter carried by capillary facets fixed on the moving water
+        // (open-water's facet statistics, napali's footprint-filtered points; both MIT): one facet a
+        // cell, its tilt about the resolved surface drifting smoothly with time, glints where that
+        // tilt mirrors the sun into the eye, lighting the pixel by the share of it the facet covers.
+        // Normalised by the expected glint so the glitter path keeps its mean. Anchored to the water
+        // (lagXZ), not to the screen: sparkles ride the waves and twinkle instead of re-rolling per
+        // pixel, which DLSS averaged into nothing.
+        var sunSpec = sunLight * min(spec, 400.0);
+        // facet slopes: the resolved roughness and the capillaries under it
+        let sig = sqrt(max(alpha2, 1e-5) * 0.5 + GLINT_CAPILLARY * GLINT_CAPILLARY);
+        // the facet tilt that mirrors the sun, in a world-stable frame about the shading normal
+        let t1 = normalize(vec3<f32>(1.0, 0.0, 0.0) - N * N.x);
+        let t2 = cross(N, t1);
+        let hN = max(dot(H, N), 1e-3);
+        let need = vec2<f32>(dot(H, t1), dot(H, t2)) / hN;
+        // past 2.5 spreads hardly a facet mirrors the sun (one in ~80)
+        if (dot(need, need) < 6.25 * sig * sig && NdL > 0.0 && tw.look.x > 0.5) {
+            let lod = max(log2(footprint * 1.5 / GLINT_CELL), 0.0);
+            let l0 = floor(lod);
+            // one facet octave, two only across the middle of the step between them
+            let k = smoothstep(0.3, 0.7, lod - l0);
+            var g = 0.0;
+            if (k < 1.0) {
+                g = glintFacet(lagXZ, GLINT_CELL * exp2(l0), u32(l0), need, sig, footprint) * (1.0 - k);
+            }
+            if (k > 0.0) {
+                g += glintFacet(lagXZ, GLINT_CELL * exp2(l0 + 1.0), u32(l0) + 1u, need, sig, footprint) * k;
+            }
+            // a glint: GLINT_PEAK times the smooth path's peak (the GGX lobe at NdH = 1), Fresnel at
+            // the mirror angle; faded in over the first light of day like the lobe
+            let peak = _waterDGGX(1.0, alpha2) * _waterVSmithGGX(NdL, NdV, alpha2) * Fs * NdL;
+            sunSpec = min(sunSpec + sunLight * (g * GLINT_PEAK * min(peak, 400.0)), vec3<f32>(30000.0));
+        }
+#else
         let sunSpec = sunLight * min(spec, 400.0);
+#endif
 
         // ---- refraction / water volume (Snell ray to the sea floor)
         let Tr = refract(-V, N, 1.0 / IOR);

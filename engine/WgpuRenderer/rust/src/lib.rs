@@ -4257,6 +4257,60 @@ impl Renderer {
         }
     }
 
+    /// The over-scene cloud march and its composite onto `target` (render_frame: before the water
+    /// from below the deck, after it from in or above the deck).
+    fn record_cloud_composite(&mut self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView) {
+        // Ensure a resolved single-sample scene depth exists (genuinely idempotent now: the
+        // water pass above already recorded it and attaches depth read-only, so the flag
+        // makes this a no-op instead of a second full-res resolve). Farthest-sample, as
+        // water uses.
+        self.ensure_far_depth_resolve(encoder);
+        // All 3D depth is written by now, so this resolve is the FINAL one: the god-ray
+        // march in the post chain can reuse it rather than recording its own.
+        self.frame_depth_final_resolved = true;
+        if let Some(depth_view) = self.gfx3d.water_depth_view().cloned() {
+            // Encoder-level brackets: render_cloud records its own passes, and the
+            // composite below opens one here. Both were unmeasured and both sit inside
+            // the colour sub-pass whose 9 ms gap this is chasing.
+            self.gpu_timers.begin(encoder, TimerRegion::CloudMarch);
+            self.sky.render_cloud(
+                &self.device,
+                &self.queue,
+                encoder,
+                &depth_view,
+                self.render_size().0,
+                self.render_size().1,
+                false,
+                true,
+            );
+            self.gpu_timers.end(encoder, TimerRegion::CloudMarch);
+            self.gpu_timers
+                .begin(encoder, TimerRegion::CloudComposite);
+            encoder.push_debug_group("wgr_cloud_composite");
+            let mut cpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("wgr_cloud_composite"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            self.sky.composite_cloud(&mut cpass);
+            drop(cpass);
+            encoder.pop_debug_group();
+            self.gpu_timers
+                .end(encoder, TimerRegion::CloudComposite);
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn render_frame(
         &mut self,
@@ -5959,6 +6013,8 @@ impl Renderer {
         // If the sky filled the target, segments load over it; else the first clears.
         let mut clear_color_next = !sky_drawn;
         let mut resolved = false;
+        // the clouds went in before the water this frame (camera below the deck)
+        let mut clouds_done = false;
         let mut start = 0usize;
         let mut seg_idx = 0usize;
         // Only the opt-in COUNT request consumes this witness. A cull dispatch alone
@@ -6782,6 +6838,22 @@ impl Renderer {
                 if let Some(dv) = self.gfx3d.water_depth_view() {
                     self.water.set_depth_view(&self.device, dv, dgen);
                 }
+                // From below the deck every cloud lies behind the sea's surface, so the clouds go
+                // in first and the water draws over them and refracts them. Composited after the
+                // water (as from in or above the deck, where a cloud can lie between the eye and
+                // the sea) a wave writes no depth, so the deck behind a crest standing above eye
+                // level was painted over its face and the face below eye level was not: a line
+                // across the screen at eye level under big waves (owner, 2026-10-26).
+                if start == 0
+                    && sky_drawn
+                    && !ablate.clouds
+                    && self.sky.clouds_active(&self.sky_params)
+                    && !self.submerged_view
+                    && self.sky.clouds_behind_water(&self.sky_params)
+                {
+                    self.record_cloud_composite(&mut encoder, &target);
+                    clouds_done = true;
+                }
                 // Freeze the completed scene before water writes `target`. Sampling this
                 // separate texture is legal; sampling the active colour attachment is not.
                 if let (
@@ -7011,56 +7083,9 @@ impl Renderer {
                 // clouds hung in front of Snell's window and showed through total internal
                 // reflection. (The refracted sky inside the window is the water shader's own.)
                 && !self.submerged_view
+                && !clouds_done
             {
-                // Ensure a resolved single-sample scene depth exists (genuinely idempotent now: the
-                // water pass above already recorded it and attaches depth read-only, so the flag
-                // makes this a no-op instead of a second full-res resolve). Farthest-sample, as
-                // water uses.
-                self.ensure_far_depth_resolve(&mut encoder);
-                // All 3D depth is written by now, so this resolve is the FINAL one: the god-ray
-                // march in the post chain can reuse it rather than recording its own.
-                self.frame_depth_final_resolved = true;
-                if let Some(depth_view) = self.gfx3d.water_depth_view().cloned() {
-                    // Encoder-level brackets: render_cloud records its own passes, and the
-                    // composite below opens one here. Both were unmeasured and both sit inside
-                    // the colour sub-pass whose 9 ms gap this is chasing.
-                    self.gpu_timers.begin(&mut encoder, TimerRegion::CloudMarch);
-                    self.sky.render_cloud(
-                        &self.device,
-                        &self.queue,
-                        &mut encoder,
-                        &depth_view,
-                        self.render_size().0,
-                        self.render_size().1,
-                        false,
-                        true,
-                    );
-                    self.gpu_timers.end(&mut encoder, TimerRegion::CloudMarch);
-                    self.gpu_timers
-                        .begin(&mut encoder, TimerRegion::CloudComposite);
-                    encoder.push_debug_group("wgr_cloud_composite");
-                    let mut cpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: Some("wgr_cloud_composite"),
-                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                            view: &target,
-                            depth_slice: None,
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Load,
-                                store: wgpu::StoreOp::Store,
-                            },
-                        })],
-                        depth_stencil_attachment: None,
-                        timestamp_writes: None,
-                        occlusion_query_set: None,
-                        multiview_mask: None,
-                    });
-                    self.sky.composite_cloud(&mut cpass);
-                    drop(cpass);
-                    encoder.pop_debug_group();
-                    self.gpu_timers
-                        .end(&mut encoder, TimerRegion::CloudComposite);
-                }
+                self.record_cloud_composite(&mut encoder, &target);
             }
 
             if early_opaque {

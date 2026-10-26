@@ -925,6 +925,7 @@ void WaterWgpu::DrawEarthWater(Scene& scene, float originX, float originZ, float
                       std::max(t.sss, 0.0f), std::clamp(t.backscatter, 0.0f, 1.0f)};
     p.tidewater[3] = {std::max(t.gust, 0.0f), std::max(t.slick, 0.0f), std::max(t.windrow, 0.0f), float(t.debugView)};
     p.tidewater_fx.z = std::clamp(t.waterGlow, 0.0f, 2.0f);
+    p.water_backend_pad[0] = t.sunGlitter ? 0u : 1u; // SEA-GLINTS off (zero keeps the default: on)
     p.tidewater_sea = {7.0f, 120.0f, std::clamp(t.whitecaps, 0.0f, 1.0f), 0.0f};
     // .z: the sea under the camera, which the renderer's underwater gate reads -- the spherical datum there,
     // not the flat 0 m: 13.6 km from the origin the sea is 14.5 m lower, and a camera 3 m over it was
@@ -1456,6 +1457,7 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
         // w: the sea's choppiness before the fold cap, which the whitecap foam is computed with
         _params.tidewater_fx = {std::clamp(t.spray, 0.0f, 3.0f), std::clamp(t.sprayIntensity, 0.0f, 3.0f),
                                 std::clamp(t.waterGlow, 0.0f, 2.0f), seaChoppiness};
+        _params.water_backend_pad[0] = t.sunGlitter ? 0u : 1u; // SEA-GLINTS off (zero keeps the default: on)
     }
     // TW-WATER W6 — the boats for the Tidewater wake simulation, from the frame's captured block
     // (the two nearest the camera; lanes in wgpu_renderer.hpp). Current OP ignores them.

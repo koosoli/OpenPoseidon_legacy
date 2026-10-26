@@ -1105,6 +1105,29 @@ void DrawWeatherStateSection()
         GWorld->SetWeather(wantedOvercast, GWorld->GetFog(), 0.0f);
     ImGui::TextDisabled("Live weather controls share the same state as Zeus.");
 
+    // Rain is its own control: heavy overcast need not mean rain. Until a mission (setRain) or
+    // this slider sets it, OFP's rule holds -- above 0.67 overcast the rain wanders at random.
+    if (GLandscape != nullptr)
+    {
+        bool followOvercast = !GLandscape->IsRainScripted();
+        if (ImGui::Checkbox("Rain follows overcast", &followOvercast))
+        {
+            if (followOvercast)
+            {
+                GLandscape->ClearScriptedRain();
+            }
+            else
+            {
+                GLandscape->SetRain(GLandscape->GetRainDensity(), 0.0f);
+            }
+        }
+        float rain = GLandscape->GetRainDensity();
+        if (ImGui::SliderFloat("Rain", &rain, 0.0f, 1.0f, "%.2f"))
+        {
+            GLandscape->SetRain(rain, 0.0f);
+        }
+    }
+
     ImGui::TextDisabled("Actual: overcast %.2f, fog %.2f", GWorld->GetOvercast(), GWorld->GetFog());
     ImGui::TextDisabled("Overcast also drives the wind: mean speed and gust envelope");
     ImGui::TextDisabled("both scale with it unless the override above is on.");
