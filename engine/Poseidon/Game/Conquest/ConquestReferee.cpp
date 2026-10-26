@@ -89,11 +89,16 @@ struct GroupRecord
     bool landing = false;        // its helicopter was told to land for the passengers
     float nudgedAt = -1.0e9f;    // when it was last un-stuck
     bool parkedHeli = false;     // its helicopter has set down for good after unloading
+    bool onFoot = false;         // its trucks got stuck: it left them where they are and walks from then on
+    bool detouring = false;      // backing off from where its vehicle got stuck ...
+    float detourUntil = 0.0f;    // ... until then; no other order meanwhile
+    int tries = 0;               // attempts to get it unstuck since it last made progress
     int supplyState = 0;         // a supply squad: 0 at the HQ, 1 loaded and on the way, 2 coming back
     int supplyTarget = -1;       // ... the base it brings supplies to
     float supplyLoad = 0.0f;     // ... and what it carries
     int supplyPin = -1;          // ... the base the commander sent it to (else the neediest)
     bool supplyDuty = false;     // a fighting squad the commander put on supply runs
+    bool truckless = false;      // a supply squad whose truck is gone: it fights on foot
     std::string engageName;      // the building or vehicle the commander told it to attack
     std::string netDoing;        // a client: what the server says it is doing
     int nudges = 0;
@@ -913,12 +918,19 @@ Vector3 TaskPoint(const ObjectiveDef& d, int groupId)
 // Every squad move goes through here. A squad whose helicopter has set down for good walks: AIGroup::Move
 // sends a squad more than 200 m from its destination back into its vehicles, and the parked helicopter is no
 // longer theirs (the soak logged the AI's get-in checks failing for its six men). So it goes in hops of 180 m;
-// TrackGroups gives the next as soon as one is done.
+// TrackGroups gives the next as soon as one is done. (A squad that left its stuck trucks needs no hops: it gave
+// them up, see TrackGroups.)
+bool Walks(const GroupRecord& rec)
+{
+    return rec.parkedHeli;
+}
+
 void MoveGroup(GroupRecord& rec, const Vector3& destination)
 {
     AIGroup* grp = rec.group;
     Vector3 go = destination;
-    if (rec.parkedHeli && grp->Leader())
+    rec.detouring = false;
+    if (Walks(rec) && grp->Leader())
     {
         const Vector3 p = grp->Leader()->Position();
         const float dx = destination.X() - p.X(), dz = destination.Z() - p.Z();
@@ -947,6 +959,12 @@ void OrderPoint(GroupRecord& rec, const Vector3& destination, float now)
     AIGroup* grp = rec.group;
     if (!grp || !grp->MainSubgroup())
         return;
+    if (std::hypot(destination.X() - rec.destination.X(), destination.Z() - rec.destination.Z()) > 30.0f)
+    {
+        rec.bestDistance = 1.0e9f; // somewhere new: progress is measured afresh
+        rec.bestAt = now;
+        rec.tries = 0;
+    }
     rec.destination = destination;
     MoveGroup(rec, rec.destination);
     rec.orderedAt = now;
@@ -981,6 +999,8 @@ float BudgetAt(const Referee& r, int side, int o);
 bool IsSupply(const Referee& r, const GroupRecord& rec);
 int HqOf(const Referee& r, int side);
 bool KeepSupplyTrucks(Referee& r, int side, float now);
+void LoseTruck(Referee& r, GroupRecord& rec, float now, bool abandoned);
+std::vector<std::string> WeaponMagazines(const std::string& weapon);
 
 GameValue RunWith(const char* code, const GameValue& o, const GameValue& p, const RString& t);
 
@@ -1329,31 +1349,7 @@ bool InContact(const Referee& r, int side, const Vector3& pos)
     return false;
 }
 
-// Out of the vehicles: everyone of a truck or APC squad; from a helicopter only the passengers, and the
-// helicopter lands for them first. (Ordering its pilot out too left it hovering a metre up for ever:
-// a pilot cannot get out of a flying helicopter, and the passengers waited for it to land.)
-void Dismount(GroupRecord& rec, Transport* heli)
-{
-    AIGroup* grp = rec.group;
-    if (!grp)
-        return;
-    if (heli && !rec.landing)
-    {
-        heli->LandStarted(Transport::LMGetOut);
-        rec.landing = true;
-    }
-    bool mounted = false;
-    for (int id = 1; id <= MAX_UNITS_PER_GROUP; id++)
-        if (AIUnit* unit = grp->UnitWithID(id); unit && !unit->IsFreeSoldier())
-        {
-            if (heli && unit->GetVehicleIn() == heli && heli->Driver() == unit->GetPerson())
-                continue; // the pilot stays at the controls; door gunners and passengers get out
-            unit->OrderGetIn(false);
-            mounted = true;
-        }
-    if (mounted)
-        grp->GetInVehicles();
-}
+#include "ConquestRefereeMove.inc"
 
 void TrackGroups(Referee& r, float now)
 {
@@ -1401,16 +1397,59 @@ void TrackGroups(Referee& r, float now)
             OrderPoint(rec, grp->Leader()->Position(), now);
             rec.holding = true;
         }
+        // A detour is driven (or has had its time): on to the destination again.
+        if (rec.detouring)
+        {
+            const bool done = grp->MainSubgroup() && !grp->MainSubgroup()->HasCommand();
+            if (!done && now < rec.detourUntil)
+            {
+                i++;
+                continue;
+            }
+            MoveGroup(rec, rec.destination); // ends the detour, whether or not it got there
+            rec.orderedAt = now;
+        }
         if (rec.task == TaskKind::Move)
         {
+            const float toDest = std::hypot(grp->Leader()->Position().X() - rec.destination.X(),
+                                            grp->Leader()->Position().Z() - rec.destination.Z());
+            if (toDest < rec.bestDistance - 25.0f || InContact(r, rec.side, grp->Leader()->Position()))
+            {
+                rec.bestDistance = std::min(rec.bestDistance, toDest);
+                rec.bestAt = now;
+                rec.tries = 0;
+            }
             if (now >= rec.lockedUntil && !Human(r, rec.side)) // under a human commander his order stands
             {
                 rec.task = TaskKind::None; // the commander's point order has run out: back to the AI
                 r.replan[rec.side] = true;
             }
-            else if (std::hypot(grp->Leader()->Position().X() - rec.destination.X(),
-                                grp->Leader()->Position().Z() - rec.destination.Z()) > 30.0f &&
-                     (now - rec.orderedAt > ReorderSeconds || rec.parkedHeli) && grp->MainSubgroup() &&
+            // Stuck on the way to the point (a supply truck, or a squad the commander sent): a vehicle
+            // backs off and tries another way; a squad on foot is simply ordered again below. A supply truck
+            // waiting at the HQ for a load is not on its way anywhere. One that five detours did not free is
+            // left behind (LoseTruck).
+            else if (!grp->IsAnyPlayerGroup() && toDest > 60.0f && now - rec.bestAt > NudgeSeconds &&
+                     now - rec.nudgedAt > NudgeSeconds && !rec.landing && InGroundVehicle(grp) &&
+                     !(IsSupply(r, rec) && rec.supplyState == 0))
+            {
+                rec.nudgedAt = now;
+                rec.nudges++;
+                const Vector3 at = grp->Leader()->Position();
+                const std::string where = " at " + std::to_string(static_cast<int>(at.X())) + " " +
+                                          std::to_string(static_cast<int>(at.Z()));
+                if (IsSupply(r, rec) && rec.tries >= 5)
+                {
+                    WarLog(Name(rec.side) + " supply truck " + Callsign(rec.id) + " stuck" + where);
+                    LoseTruck(r, rec, now, true);
+                }
+                else
+                {
+                    Detour(rec, now);
+                    WarLog(Name(rec.side) + (IsSupply(r, rec) ? " supply truck " + Callsign(rec.id) : " group " + std::to_string(rec.id)) +
+                           " stuck" + where + ": backing off to try another way");
+                }
+            }
+            else if (toDest > 30.0f && (now - rec.orderedAt > ReorderSeconds || Walks(rec)) && grp->MainSubgroup() &&
                      !grp->MainSubgroup()->HasCommand())
                 OrderPoint(rec, rec.destination, now);
         }
@@ -1424,10 +1463,13 @@ void TrackGroups(Referee& r, float now)
             {
                 rec.bestDistance = std::min(rec.bestDistance, dist);
                 rec.bestAt = now;
+                rec.tries = 0;
             }
-            // Stuck on the way (no progress for 90 s, not fighting): a truck or APC squad gets out and walks
-            // (vehicles wedge on terrain and in villages); a squad on foot, or a crew that stays mounted, is
-            // ordered again to a point a little to the side, which gives its pathfinding a new start.
+            // Stuck on the way (no progress for 90 s, not fighting). A vehicle first backs off and tries
+            // another way (Detour). A truck or APC squad still stuck after that gets out and walks for good
+            // (vehicles wedge on terrain and in villages); a crew that stays mounted alternates detours with
+            // another approach to the town; a squad on foot is ordered again to a point a little to the side,
+            // which gives its pathfinding a new start.
             // Only a squad still outside the town is stuck: one in it (a tank at the edge, fighting its way to
             // the post) is where it should be -- the soak nudged one tank 17 times there. A helicopter landing
             // is left alone: a new order lifts it off again.
@@ -1436,14 +1478,30 @@ void TrackGroups(Referee& r, float now)
             {
                 rec.nudgedAt = now;
                 rec.nudges++;
-                bool inGroundVehicle = false;
-                for (int id = 1; id <= MAX_UNITS_PER_GROUP; id++)
-                    if (AIUnit* unit = grp->UnitWithID(id); unit && unit->GetVehicleIn() &&
-                                                           !dynamic_cast<Helicopter*>(unit->GetVehicleIn()))
-                        inGroundVehicle = true;
-                if (inGroundVehicle && !crew)
+                const bool inGroundVehicle = InGroundVehicle(grp);
+                if (inGroundVehicle && (rec.tries < 1 || (crew && rec.tries % 3 != 2)))
                 {
+                    Detour(rec, now);
+                    const Vector3 at = grp->Leader()->Position();
+                    WarLog(Name(rec.side) + " group " + std::to_string(rec.id) + " stuck on the way to " + d.name + " at " +
+                           std::to_string(static_cast<int>(at.X())) + " " + std::to_string(static_cast<int>(at.Z())) +
+                           ": backing off to try another way");
+                }
+                else if (inGroundVehicle && !crew)
+                {
+                    // It leaves the trucks for good (the script command leaveVehicle): the engine's own move
+                    // and attack logic sends a squad back to its vehicles on any move over 200-300 m, so a squad
+                    // that merely got out was back in the same stuck truck within a minute, and its men, moved
+                    // between seats on the way, failed the AI's get-in checks.
+                    std::vector<Transport*> trucks;
+                    for (int v = 0; v < grp->NVehicles(); v++)
+                        if (Transport* t = grp->GetVehicle(v); t && !dynamic_cast<Helicopter*>(t))
+                            trucks.push_back(t);
                     Dismount(rec, nullptr);
+                    for (Transport* t : trucks)
+                        grp->UnassignVehicle(t);
+                    grp->GetInVehicles();
+                    rec.onFoot = true;
                     WarLog(Name(rec.side) + " group " + std::to_string(rec.id) + " stuck in its vehicles on the way to " +
                            d.name + ": on foot");
                 }
@@ -1454,6 +1512,7 @@ void TrackGroups(Referee& r, float now)
                     rec.destination = Ground(d.x + std::cos(a) * off, d.y + std::sin(a) * off);
                     MoveGroup(rec, rec.destination);
                     rec.orderedAt = now;
+                    rec.tries++;
                     WarLog(Name(rec.side) + " group " + std::to_string(rec.id) + " stuck on the way to " + d.name +
                            ": ordered again by another way");
                 }
@@ -1464,9 +1523,10 @@ void TrackGroups(Referee& r, float now)
                 r.replan[rec.side] = true;
                 WarLog(Name(rec.side) + " group " + std::to_string(rec.id) + " stalled on the way to " + d.name);
             }
-            // The order can be used up (reached, or replaced by combat); give it again if still far.
-            if (!grp->IsAnyPlayerGroup() && dist > d.captureRadius * 1.2f &&
-                (now - rec.orderedAt > ReorderSeconds || rec.parkedHeli) && grp->MainSubgroup() &&
+            // The order can be used up (reached, or replaced by combat); give it again if still far. Not in the
+            // tick a detour began: that would cancel it.
+            if (!grp->IsAnyPlayerGroup() && dist > d.captureRadius * 1.2f && !rec.detouring &&
+                (now - rec.orderedAt > ReorderSeconds || Walks(rec)) && grp->MainSubgroup() &&
                 !grp->MainSubgroup()->HasCommand())
                 Order(rec, d, now);
         }
@@ -1657,6 +1717,12 @@ void Plan(Referee& r, int side, float now)
             if (now < rec.lockedUntil || (Human(r, side) && rec.task != TaskKind::None) ||
                 (rec.group && rec.group->IsAnyPlayerGroup()))
                 break; // the human commander's order stands, or the player leads this squad
+            // The task it already has: nothing to do. (A worn-down squad in a rear town was freed and given the
+            // same "regrouping" task back on every plan; each re-order planned its path anew and reset its
+            // progress, so it was never seen to be stuck -- 39 to 145 times a war.) A stalled squad is ordered
+            // again: that is a new attempt.
+            if (rec.task == intent.task && rec.objective == intent.objective && !rec.stalled)
+                break;
             if (rec.task != intent.task || rec.objective != intent.objective)
                 radioed[{static_cast<int>(intent.task), intent.objective}].push_back(rec.id);
             rec.task = intent.task;
@@ -2001,11 +2067,19 @@ void UpdateArsenals(Referee& r, float now)
         if (EntityAI* stocked = post.arsenal)
             for (const auto& [weapon, count] : r.config.arsenalWeapons[owner])
             {
-                GameValue cargo = GWorld->GetGameState()->CreateGameValue(GameArray);
-                GameArrayType& c = cargo;
-                c.Add(GameValue(RString(weapon.c_str())));
-                c.Add(GameValue(static_cast<float>(count)));
-                RunWith("_o addWeaponCargo _p", GameValueExt(stocked), cargo);
+                const auto add = [&](const char* command, const std::string& item, int n)
+                {
+                    GameValue cargo = GWorld->GetGameState()->CreateGameValue(GameArray);
+                    GameArrayType& c = cargo;
+                    c.Add(GameValue(RString(item.c_str())));
+                    c.Add(GameValue(static_cast<float>(n)));
+                    RunWith(command, GameValueExt(stocked), cargo, RString());
+                };
+                add("_o addWeaponCargo _p", weapon, count);
+                // Its ammunition too: the side's ammo box holds only the common magazines (no M21 or SVD rounds
+                // in it, owner 2026-10-26), so a weapon the arsenal offers came without anything to fire.
+                for (const std::string& magazine : WeaponMagazines(weapon))
+                    add("_o addMagazineCargo _p", magazine, count * 5);
             }
     }
 }
@@ -2855,6 +2929,9 @@ LSError SerializeSaved(ParamArchive& ar, Saved& w)
         PARAM_CHECK(sub.Serialize("stalled", g.stalled, 1, false))
         PARAM_CHECK(sub.Serialize("lockedUntil", g.lockedUntil, 1, -1.0e9f))
         PARAM_CHECK(sub.Serialize("type", g.type, 1, 0))
+        PARAM_CHECK(sub.Serialize("onFoot", g.onFoot, 1, false))
+        PARAM_CHECK(sub.Serialize("truckless", g.truckless, 1, false))
+        PARAM_CHECK(sub.Serialize("parkedHeli", g.parkedHeli, 1, false))
         g.task = static_cast<TaskKind>(task);
         ar.CloseSubclass(sub);
     }
@@ -4103,6 +4180,10 @@ std::string Doing(const Referee& r, const GroupRecord& rec)
     }
     if (rec.landing && !rec.parkedHeli)
         text += " (landing to unload)";
+    else if (rec.detouring)
+        text += " (stuck, backing off to try another way)";
+    else if (rec.onFoot && rec.task != TaskKind::None)
+        text += " (on foot, its trucks got stuck)";
     return text;
 }
 } // namespace

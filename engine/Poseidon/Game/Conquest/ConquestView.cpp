@@ -2905,6 +2905,13 @@ bool ProcessEvent(const SDL_Event& event)
             s.consumeKeyboard = true;
             return true;
         }
+        if (PlayerSide() != NoSide)
+        {
+            // Said, rather than a key that silently does nothing (the test harnesses start wars this way too).
+            Notify("The commander view is switched off for this war (setup: Commander view)");
+            s.consumeKeyboard = true;
+            return true;
+        }
         return false;
     }
     if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && (event.key.mod & SDL_KMOD_CTRL) != 0 &&

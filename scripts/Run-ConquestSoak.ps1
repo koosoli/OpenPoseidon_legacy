@@ -16,8 +16,10 @@
 param(
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
     [string]$Bin = '',
-    [double]$Minutes = 20,
-    [double]$AccTime = 4,
+    [double]$GameMinutes = 80,
+    [double]$Minutes = 25,
+    [double]$AccTime = 8,
+    [int]$FpsCap = 0,
     [int]$PollSeconds = 30,
     [int]$ShotEveryPolls = 10,
     [int]$Seed = 0,
@@ -29,7 +31,8 @@ $root = Split-Path $PSScriptRoot -Parent
 if (!$env:LOCK_OWNER) {
     $shellExe = Join-Path $PSHOME 'powershell.exe'
     $argv = @((Join-Path $PSScriptRoot 'with-game-lock.sh'), $shellExe.Replace('\', '/'), '-NoProfile', '-File', $PSCommandPath,
-        '-GameDir', $GameDir, '-Minutes', "$Minutes", '-AccTime', "$AccTime", '-PollSeconds', "$PollSeconds",
+        '-GameDir', $GameDir, '-GameMinutes', "$GameMinutes", '-Minutes', "$Minutes", '-AccTime', "$AccTime",
+        '-FpsCap', "$FpsCap", '-PollSeconds', "$PollSeconds",
         '-ShotEveryPolls', "$ShotEveryPolls", '-Seed', "$Seed")
     if ($Bin) { $argv += @('-Bin', $Bin) }
     if ($Visible) { $argv += '-Visible' }
@@ -47,7 +50,7 @@ $exe = Join-Path $Bin 'OpenPoseidon.exe'
 if (!(Test-Path $exe)) { throw "Missing build: $exe" }
 $env:POSEIDON_USER_DIR = Join-Path $out 'user'
 New-Item -ItemType Directory -Force $env:POSEIDON_USER_DIR | Out-Null
-[IO.File]::WriteAllLines((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'), @('qualityPreset=1;', 'dlssMode=0;', 'vsync=0;', 'fpsCap=60;'))
+[IO.File]::WriteAllLines((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'), @('qualityPreset=1;', 'dlssMode=0;', 'vsync=0;', "fpsCap=$FpsCap;"))
 if ($Seed) { $env:POSEIDON_RNG_SEED = "$Seed" }
 $mission = Join-Path $root 'content/default-packs/conquest/missions/conquest-everon.Eden'
 $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
@@ -133,6 +136,9 @@ try {
     }
     $start = [DateTime]::UtcNow
     $poll = 0
+    # Until the war has run GameMinutes of game time (Minutes of real time at most). The game advances at most
+    # 8 fixed 60 Hz steps a frame, so the frame rate caps the speed: uncapped (FpsCap 0) it keeps up with
+    # setAccTime 8, where the old 60 fps cap held a war to 4x and 80 game minutes took 20 real ones.
     while (([DateTime]::UtcNow - $start).TotalMinutes -lt $Minutes) {
         if ($p.HasExited) { throw 'Game exited during the soak' }
         $state = Eval 'conquestState'
@@ -141,6 +147,7 @@ try {
             ConvertTo-Json -Compress) | Add-Content $jsonl
         Write-Output ("[{0,5:N0}s real, {1} game] {2}" -f ([DateTime]::UtcNow - $start).TotalSeconds, $game, $state)
         if ($poll % $ShotEveryPolls -eq 0) { Shot ('map-{0:D3}' -f $poll) }
+        if ([double]$game -ge $GameMinutes * 60) { break }
         if ($state -match 'wins|DEFEATED' -and $state -notmatch 'inactive') {
             if (((Get-Content $jsonl) | Select-String 'DEFEATED').Count -ge 2) { break }
         }

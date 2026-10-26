@@ -95,6 +95,10 @@ function Send($command) {
 function Eval($code) { return "$((Send @{cmd = 'eval'; code = $code }).result)".Trim('"') }
 function Shot($name) { $null = Send @{cmd = 'screenshot'; path = (Join-Path $script:out ($name + '.png')) } }
 function LogCount($pattern) { return ([regex]::Matches((Get-Content $script:log -Raw), $pattern)).Count }
+# Waits for something to happen in the game run it at 4x: the checks are about game time, and the real-time
+# waits were most of the test (a plane's flight, a helicopter's 1.9 km).
+function Fast { $null = Eval 'setAccTime 4; true' }
+function Normal { $null = Eval 'setAccTime 1; true' }
 
 Invoke-Run 'A-soldier' {
     Shot 'setup-screen'
@@ -103,6 +107,12 @@ Invoke-Run 'A-soldier' {
     Shot 'soldier-hq-order'
     Check ((LogCount 'HQ to the player squad') -ge 1) 'A: HQ gave the player''s squad an order'
     Check ((LogCount 'Conquest: the war begins') -eq 1) 'A: the war began once'
+    # The arsenal at WEST's HQ (Morton) brings ammunition for every weapon it offers, the sniper rifle's too.
+    $mags = Eval '_b = [5134, 3955] nearObjects ["ReammoBoxWest", 600]; if (count _b == 0) then {"no box"} else {format ["%1", (getMagazineCargo (_b select 0)) select 0]}'
+    Check ($mags -match 'M21') "A: the arsenal holds sniper rounds ($mags)"
+    Check ($mags -match 'CarlGustav') "A: and Carl Gustav rounds ($mags)"
+    $guns = Eval '_b = [5134, 3955] nearObjects ["ReammoBoxWest", 600]; if (count _b == 0) then {"no box"} else {format ["%1", (getWeaponCargo (_b select 0)) select 0]}'
+    Check ($guns -match 'M21') "A: and the sniper rifle ($guns)"
     foreach ($k in 1..2) {
         $null = Eval 'player setDammage 1'
         Start-Sleep -Seconds 5
@@ -120,6 +130,8 @@ Invoke-Run 'B-commander' {
     Check ((Eval 'conquestStart ["EAST", "commander", "contacts", "", [], false, 0, [500, 1500], 0, false, 0]') -eq 'true') 'B: the war starts in command'
     Start-Sleep -Seconds 8
     Check ((LogCount 'commander view on') -ge 1) 'B: the command view opened at the start'
+    $mags = Eval '_b = [4772, 10923] nearObjects ["ReammoBoxEast", 600]; if (count _b == 0) then {"no box"} else {format ["%1", (getMagazineCargo (_b select 0)) select 0]}'
+    Check ($mags -match 'SVD') "B: EAST's arsenal holds sniper rounds ($mags)"
     $null = Eval 'conquestCamera [4772, 10700, 700, 55, 180]'
     Start-Sleep -Seconds 2
     Shot 'command-airfield'
@@ -162,7 +174,9 @@ Invoke-Run 'B-commander' {
     $null = Eval '{_x setDammage 1} forEach ([4700, 10450] nearObjects ["Su25", 6000])'
     Start-Sleep -Seconds 4
     Check ((LogCount 'EAST air strike lost') -ge 1) 'B: the plane shot down, the strike is lost'
-    Start-Sleep -Seconds 40
+    Fast
+    Start-Sleep -Seconds 10
+    Normal
     Check ((LogCount 'EAST air strike: bombs away') -eq 0) 'B: a downed plane drops nothing'
 }
 
@@ -181,8 +195,10 @@ Invoke-Run 'C-barrage' {
     $air = Eval 'conquestAirStrike [4600, 10650]'
     Check ($air -eq 'true') "C: the air strike was called ($air)"
     Check ((Eval 'conquestAirStrike [4600, 10650]') -match 'on its way|rearming') 'C: one plane at a time'
-    $deadline = [DateTime]::UtcNow.AddSeconds(100)
-    while ((LogCount 'EAST air strike: bombs away') -lt 1 -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Seconds 2 }
+    Fast
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    while ((LogCount 'EAST air strike: bombs away') -lt 1 -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 500 }
+    Normal
     Check ((LogCount 'EAST air strike: bombs away') -ge 1) 'C: the plane dropped its bombs'
     foreach ($t in 1..4) {
         Start-Sleep -Milliseconds 700
@@ -197,14 +213,16 @@ Invoke-Run 'C-barrage' {
     Check ($what -ne '') "C: the tanks engage a building in Tyrone ($what)"
     # The helicopter squad to Tyrone (1.9 km): it must land to unload, not hover over the drop.
     Check ((Eval 'conquestOrder [[13], 4946, 9056]') -eq '1') 'C: the air assault squad sent to Tyrone'
-    $deadline = [DateTime]::UtcNow.AddSeconds(150)
+    Fast
+    $deadline = [DateTime]::UtcNow.AddSeconds(45)
     $landed = $false
     while (!$landed -and [DateTime]::UtcNow -lt $deadline) {
-        Start-Sleep -Seconds 5
+        Start-Sleep -Seconds 2
         # the Mi-17 near Tyrone: on the ground (under 2 m) with only its pilot left aboard
         $state = Eval '_h = [4946, 9056] nearObjects ["Mi17", 600]; if (count _h == 0) then {"none"} else {format ["%1 %2", (getPos (_h select 0)) select 2, count crew (_h select 0)]}'
         if ($state -match '^([\d.]+) (\d+)$' -and [double]$Matches[1] -lt 2.0 -and [int]$Matches[2] -le 1) { $landed = $true }
     }
+    Normal
     Shot 'helicopter-unloaded'
     Check $landed "C: the helicopter landed and unloaded at Tyrone ($state)"
 }
