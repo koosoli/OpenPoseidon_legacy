@@ -1873,7 +1873,7 @@ fn march_clouds(
     // owner's Zeus slider "at one point the more overcast I do it becomes brighter again" (measured:
     // horizon 142 at 70%, 188 at 90%). Falls to 45% of the light at full overcast, monotonically,
     // scaled by OVERCAST-GLOOM (weather.z; off until the owner has seen it).
-    let deck_thick = 1.0 - 0.55 * clamp(sky.weather.z, 0.0, 1.0) * smoothstep(0.6, 1.0, cov);
+    let deck_thick = 1.0 - 0.6 * clamp(sky.weather.z, 0.0, 1.0) * smoothstep(0.55, 0.9, cov);
     res.inscatter = col * deck_thick * (1.0 - 0.78 * clamp(sky.weather.x, 0.0, 1.0));
     // The early-out above LEFT transmittance at the cut instead of driving it to zero, so a deck
     // that is opaque to the eye still passed ~1% of whatever was behind it. That is harmless for a
@@ -2248,7 +2248,7 @@ fn cirrus_field(world_xz: vec2<f32>, h: f32, cover: f32, warp: vec3<f32>, sh: Ci
     // across with clear sky between them, by the warp tap's third channel, strongest when sparse
     // and gone by a closing layer (the mean coverage stays about where it was).
     let patchy = (1.0 - smoothstep(0.35, 0.75, cover)) * clamp(sky.weather.w, 0.0, 1.0);
-    let cov_l = clamp(mix(cover, cover * mix(0.35, 1.65, smoothstep(0.3, 0.7, warp.z)), patchy), 0.0, 1.0);
+    let cov_l = clamp(mix(cover, cover * mix(0.55, 1.45, warp.z), patchy), 0.0, 1.0);
     var d0 = clamp((sheet - (1.0 - cov_l)) / max(cov_l, 1e-3), 0.0, 1.0);
     if (d0 <= 0.0) {
         return 0.0; // in a gap -> skip the fibre tap (the empty-space fast path, as the deck does)
