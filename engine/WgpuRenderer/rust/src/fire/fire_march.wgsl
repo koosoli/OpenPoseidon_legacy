@@ -114,12 +114,18 @@ fn boxQ(i: u32, rel: vec3<f32>) -> vec3<f32> {
 // ripple about a twelfth of the box deep, so where the smoke thins is not a plane.
 fn boxFade(q: vec3<f32>) -> f32 {
     let t = M.sizes.w;
-    let warp = 0.045 * (sin(dot(q, vec3<f32>(9.1, 6.3, 7.7)) + t * 0.9)
+    // (2026-10-26, owner: "i still see the end of the bounding box") wider still, a finer and faster
+    // ripple on top of the broad one, and the density thinned gradually (a squared smoothstep) so no
+    // single surface carries the cut: the top of a tall column dissolves over its upper 45%
+    let warp = 0.06 * (sin(dot(q, vec3<f32>(9.1, 6.3, 7.7)) + t * 0.9)
         + sin(dot(q, vec3<f32>(-5.3, 11.2, 8.4)) - t * 0.7) * 0.6
-        + sin(dot(q, vec3<f32>(13.7, -4.1, -10.9)) + t * 1.3) * 0.4);
+        + sin(dot(q, vec3<f32>(13.7, -4.1, -10.9)) + t * 1.3) * 0.4)
+        + 0.03 * sin(dot(q, vec3<f32>(31.0, 23.0, -27.0)) + t * 2.1);
     let side = min(min(q.x, 1.0 - q.x), min(q.z, 1.0 - q.z)) + warp;
     let top = 1.0 - q.y + warp;
-    return smoothstep(0.02, 0.15, side) * smoothstep(0.02, 0.25, top);
+    let fs = smoothstep(0.0, 0.22, side);
+    let ft = smoothstep(0.0, 0.45, top);
+    return fs * fs * ft * ft;
 }
 
 // the field at camera-relative `rel`, faded out at the box's sides and top (boxFade)
