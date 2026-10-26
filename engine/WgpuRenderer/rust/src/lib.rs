@@ -1083,8 +1083,6 @@ pub struct Renderer {
     // rather than every frame. The pass has had two independent triggers and a toggle that
     // did not reach one of them; "is it running right now" needs to be answerable from a log.
     underwater_engaged_logged: Option<bool>,
-    /// LENS-FILM: sea time when the eye was last under the water
-    lens_last_wet: f32,
     // TW-WATER W5d: the eye is clearly under the water surface this frame (see the cloud composite).
     submerged_view: bool,
     post_source_underwater: bool,
@@ -2555,7 +2553,6 @@ impl Renderer {
             dof_depth_warned: false,
             underwater_size: (0, 0),
             underwater_engaged_logged: None,
-            lens_last_wet: f32::NEG_INFINITY,
             submerged_view: false,
             post_source_underwater: false,
             post_source_dof: false,
@@ -4869,9 +4866,6 @@ impl Renderer {
             None => (sea_level, time, submersion),
         });
         // RFG-191: inside a pond its flat level decides (the time lane only animates caustics).
-        // LENS-FILM: after surfacing the composite stays engaged while the lens drains
-        let lens_on = crate::water_tw::lens_film_enabled();
-        let lens_last_wet = self.lens_last_wet;
         let underwater_state = lake_under_camera
             .map(|level| (level, sea_state.map(|s| s.1).unwrap_or(0.0), 0.0))
             .or(sea_state)
@@ -4882,11 +4876,8 @@ impl Renderer {
                     // Prepared (jittered) camera, same reasoning as the sky ivp above.
                     prepared_cameras.get(water_camera).and_then(|cam| {
                         let cam_above = cam.cam_pos[1] - sea_level;
-                        let lens_drying = lens_on
-                            && time >= lens_last_wet
-                            && time - lens_last_wet < crate::water_tw::LENS_FILM_SECS;
                         let engage = underwater_enabled
-                            && (player_submerged || cam_above < underwater_near_surface_band || lens_drying);
+                            && (player_submerged || cam_above < underwater_near_surface_band);
                         engage.then(|| {
                             // Same separate-inverse-in-f64 treatment the frame UBO uses: the
                             // reversed-Z infinite-far projection is ill-conditioned in f32 and
@@ -4911,23 +4902,6 @@ impl Renderer {
                         })
                     })
                 });
-        if lens_on {
-            let mut since_dry = -1.0;
-            if let Some((t, above, _, _)) = &underwater_state {
-                if *t < self.lens_last_wet {
-                    // the sea clock went back (a new mission): the lens is dry
-                    self.lens_last_wet = f32::NEG_INFINITY;
-                }
-                if *above < 0.0 {
-                    self.lens_last_wet = *t;
-                } else if *t - self.lens_last_wet < crate::water_tw::LENS_FILM_SECS {
-                    since_dry = *t - self.lens_last_wet;
-                }
-            }
-            if let Some(tw) = self.water.tidewater_mut() {
-                tw.set_lens_film(since_dry);
-            }
-        }
         let underwater_engaged = underwater_state.is_some();
         // PERF-TW-CAUSTICS-GATE: the caustics (0.13 ms) are read only by the water surface and the
         // underwater composite. When the depth-tested water query has seen no water sample for two

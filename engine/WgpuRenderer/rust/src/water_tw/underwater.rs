@@ -84,9 +84,6 @@ pub struct UwParams {
     /// W9a: the drawn surface around the camera (`probe.rs`): camera x, z, grid step, grid size
     /// (0: no grid yet, the FFT height alone)
     pub probe: [f32; 4],
-    /// LENS-FILM: x seconds since the eye left the water (< 0: dry lens, nothing drawn),
-    /// y strength, z animation time (s)
-    pub lens: [f32; 4],
 }
 
 fn srgb_to_linear(c: f32) -> f32 {
@@ -146,7 +143,6 @@ impl UwParams {
             torch_col,
             torch_shape,
             probe: [0.0; 4],
-            lens: [-1.0, 0.0, 0.0, 0.0],
         }
     }
 }
@@ -310,7 +306,7 @@ mod tests {
 
     #[test]
     fn params_block_matches_the_wgsl() {
-        assert_eq!(std::mem::size_of::<UwParams>(), 64 + 14 * 16); // 14 vec4 lanes since LENS-FILM
+        assert_eq!(std::mem::size_of::<UwParams>(), 64 + 13 * 16);
     }
 
     #[test]

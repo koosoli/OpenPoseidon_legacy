@@ -68,16 +68,6 @@ pub(crate) const EARTH_SEA_CEILING: f32 = 40000.0;
 /// TW-FOAM2 (WGR_TW_FOAM2=1): two-stage whitecaps -- the FFT keeps an active-breaking field
 /// (~0.4 s) beside the persistent foam, and the water draws the caps' solid cores from it, the
 /// lace from the persistent foam. Off by default until the owner picks it from A/B captures.
-/// LENS-FILM (WGR_LENS_FILM=1): after the eye leaves the water, a film drains down the lens
-/// with rivulets and beads (minamo's lens water, MIT, as an idea): the underwater composite keeps
-/// running for LENS_FILM_SECS and refracts the view through it. Off by default.
-pub fn lens_film_enabled() -> bool {
-    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *V.get_or_init(|| std::env::var("WGR_LENS_FILM").as_deref() == Ok("1"))
-}
-/// how long the lens stays wet after surfacing (s)
-pub const LENS_FILM_SECS: f32 = 6.0;
-
 pub fn foam2_enabled() -> bool {
     static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *V.get_or_init(|| std::env::var("WGR_TW_FOAM2").as_deref() == Ok("1"))
@@ -601,8 +591,6 @@ pub struct Tidewater {
     /// SEA-RAIN variant, drawn while `raining` (None: WGR_SEA_RAIN=0).
     pipeline_rain: Option<wgpu::RenderPipeline>,
     raining: bool,
-    /// LENS-FILM: seconds since the eye left the water (< 0: dry)
-    lens_since_dry: f32,
     grid_vbuf: wgpu::Buffer,
     grid_ibuf: wgpu::Buffer,
     grid_index_count: u32,
@@ -1008,7 +996,6 @@ impl Tidewater {
             pipeline,
             pipeline_rain,
             raining: false,
-            lens_since_dry: -1.0,
             grid_vbuf,
             grid_ibuf,
             grid_index_count: indices.len() as u32,
@@ -1434,7 +1421,6 @@ impl Tidewater {
             self.probe_lanes = probe::Probe::lanes(cp);
             self.probe.set_camera(cp);
             self.query.prepare(queue);
-            uwp.lens = [self.lens_since_dry, 1.0, p.time, 0.0];
             self.uw.set_frame(queue, &uwp);
         }
         lap.mark("surface+uw");
@@ -1727,11 +1713,6 @@ impl Tidewater {
     /// selects the sea's rain variant.
     pub fn set_rain(&mut self, rain: f32) {
         self.raining = rain > 0.0;
-    }
-
-    /// LENS-FILM: seconds since the eye left the water (< 0: the lens is dry).
-    pub fn set_lens_film(&mut self, since_dry: f32) {
-        self.lens_since_dry = since_dry;
     }
 
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>, camera: &wgpu::BindGroup, offset: u32) {

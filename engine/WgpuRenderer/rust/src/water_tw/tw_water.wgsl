@@ -37,8 +37,54 @@
 
 const FFT_SIZE: f32 = 256.0;
 const CASCADES: i32 = 4;
-// SEA-GLINTS: the share of the sun lobe its Poisson glints carry
-const GLINT_SHARE: f32 = 0.6;
+// SEA-GLINTS: the share of the sun lobe the facets carry (the rest stays the smooth highlight),
+// the finest facet cell (m), a facet's glint tolerance in units of the slope spread, its radius in cells
+const GLINT_SHARE: f32 = 0.7;
+const GLINT_CELL: f32 = 0.05;
+const GLINT_TOL: f32 = 0.3;
+const GLINT_RADIUS: f32 = 0.3;
+fn glintHash(c: vec2<f32>, k: f32) -> f32 {
+    return fract(sin(dot(c, vec2<f32>(127.1, 311.7)) + k * 74.7) * 43758.5453);
+}
+// a facet's tilt: an approximately unit-normal pair, re-drawn GLINT_RATE times a second and blended
+// between draws so it drifts rather than jumps
+fn glintTilt(c: vec2<f32>, t: f32) -> vec2<f32> {
+    let ph = glintHash(c, 9.0);
+    let tt = t * GLINT_RATE + ph;
+    let i = floor(tt);
+    let f = smoothstep(0.0, 1.0, tt - i);
+    var r = vec2<f32>(0.0);
+    for (var j = 0; j < 2; j++) {
+        let k = i + f32(j) * 1.0;
+        // sum of three uniforms, centred and scaled to unit variance: near enough to a normal draw
+        let x = (glintHash(c, k * 3.1 + 1.0) + glintHash(c, k * 3.1 + 2.0) + glintHash(c, k * 3.1 + 3.0) - 1.5) * 2.0;
+        let y = (glintHash(c, k * 5.3 + 4.0) + glintHash(c, k * 5.3 + 5.0) + glintHash(c, k * 5.3 + 6.0) - 1.5) * 2.0;
+        r += vec2<f32>(x, y) * select(1.0 - f, f, j == 1);
+    }
+    // two draws blended lose variance mid-way; restore it
+    return r / sqrt((1.0 - f) * (1.0 - f) + f * f);
+}
+const GLINT_RATE: f32 = 3.0;
+// the glint of the facet in this pixel's cell of size `cell`, over its expected value: `need` is the
+// tilt that mirrors the sun, `sig` the facets' slope spread, `fp` the pixel footprint (m)
+fn glintFacet(xz: vec2<f32>, cell: f32, need: vec2<f32>, sig: f32, fp: f32) -> f32 {
+    let c = floor(xz / cell);
+    let centre = (c + 0.35 + 0.3 * vec2<f32>(glintHash(c, 1.7), glintHash(c, 2.9))) * cell;
+    let r = GLINT_RADIUS * cell;
+    // the share of the pixel the facet disc covers: a soft disc whose edge widens with the footprint
+    let d = length(xz - centre);
+    let cover = clamp((r + 0.5 * fp - d) / max(fp, 1e-4), 0.0, 1.0) * min(r * r / max(0.25 * fp * fp, 1e-8), 1.0);
+    let tau = GLINT_TOL * sig;
+    let off = glintTilt(c, frame.ground_weather.w) * sig - need;
+    let w = exp(-dot(off, off) / (2.0 * tau * tau));
+    // expected glint at this `need` over the random tilt: the facet-tilt Gaussian (sig) convolved
+    // with the tolerance (tau); times the disc's expected cover of a pixel. Dividing by it keeps the
+    // smooth lobe's mean wherever the lobe is.
+    let e2 = sig * sig + tau * tau;
+    let ew = tau * tau / e2 * exp(-dot(need, need) / (2.0 * e2));
+    let ec = 3.14159265 * (r + 0.25 * fp) * (r + 0.25 * fp) / (cell * cell);
+    return min(w * cover / max(ew * min(ec, 1.0), 1e-4), 60.0);
+}
 
 override linear: f32 = 1.0;
 
@@ -571,8 +617,9 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
     // (OP, TW-FOAM2) the cap is where the crest breaks NOW: the active field (~0.4 s) of the two
     // whitecap cascades (x3: it settles at about a third of the persistent foam's level); the
     // persistent foam, seconds old, goes to the lace below instead of keeping the cap solid.
-    // Close to the eye only: beyond 1.5 m pixels the plain per-vertex foam carries the caps.
-    let activeNear = 1.0 - smoothstep(0.6, 1.5, footprint);
+    // Close to the eye only: beyond 0.8 m pixels (a cap is a few pixels there) the plain per-vertex
+    // foam carries the caps -- the 8 buffer reads are paid only where a cap's core and rim resolve.
+    let activeNear = 1.0 - smoothstep(0.3, 0.8, footprint);
     var activeFoam = 0.0;
     if (activeNear > 0.0) {
         activeFoam = (activeFoamAt(lagXZ, 1) * 0.45 + activeFoamAt(lagXZ, 2) * 0.5) * 3.0;
@@ -855,10 +902,6 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
     let footprint = max(length(fwidth(lagXZ)), 1e-4);
     let dwx = dpdx(rel);
     let dwy = dpdy(rel);
-#ifdef SEA_GLINTS
-    // (OP, SEA-GLINTS) the pixel's footprint on the sea (m^2), taken here in uniform control flow
-    let glintFootA = max(length(cross(dwx, dwy)), 1e-9);
-#endif
     var thickness = pos.y - groundH;
 
     let dist = length(rel);
@@ -1062,42 +1105,27 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         let spec = _waterDGGX(NdH, alpha2) * _waterVSmithGGX(NdL, NdV, alpha2) * Fs * NdL;
 #endif
 #ifdef SEA_GLINTS
-        // (OP, SEA-GLINTS) sun glitter carried by capillary facets (open-water's water.js, MIT): the
-        // expected sun reflection in this pixel equals lam glinting facets of ~1 cm^2, each mirroring the
-        // sun's disc (6.8e-5 sr) at full brightness. The pixel shows a Poisson count of them, re-rolled
-        // 12 times a second: sparse full-brightness sparkles near the eye, the smooth glitter path far
-        // away, the same mean everywhere. Drawn out along the wave at grazing angles.
+        // (OP, SEA-GLINTS) the sun's glitter carried by capillary facets fixed on the moving water
+        // (open-water's facet statistics, napali's footprint-filtered points; both MIT): one facet a
+        // cell, its tilt about the resolved surface drifting smoothly with time, glints where that
+        // tilt mirrors the sun into the eye, lighting the pixel by the share of it the facet covers.
+        // Normalised by the expected glint so the glitter path keeps its mean. Anchored to the water
+        // (lagXZ), not to the screen: sparkles ride the waves and twinkle instead of re-rolling per
+        // pixel, which DLSS averaged into nothing.
         var sunSpec = sunLight * min(spec, 400.0);
-        {
-            let glintArea = 1e-4 * mix(1.5, 1.0, smoothstep(8.0, 80.0, dist));
-            let gx = clamp(0.15 / max(V.y, 0.0375), 1.0, 3.0);
-            let lam = min(spec, 400.0) * 6.8e-5 / max(Fs, 0.02) * (glintFootA / glintArea) * gx;
-            if (lam > 1e-5 && lam < 400.0) {
-                let px = floor(in.clip.xy);
-                let cell = vec2<f32>(floor((px.x + floor(fract(sin(px.y * 12.97 + 3.7) * 43758.5453) * gx)) / gx), px.y);
-                let ph = fract(sin(dot(cell, vec2<f32>(7.13, 3.71))) * 912.3);
-                let u = fract(sin(dot(vec3<f32>(cell, floor(frame.ground_weather.w * 12.0 + ph)), vec3<f32>(12.9898, 78.233, 37.719))) * 43758.5453);
-                var k = 0.0;
-                if (lam < 12.0) {
-                    var pk = exp(-lam);
-                    var cdf = pk;
-                    for (var i = 0; i < 24; i++) {
-                        if (u <= cdf) { break; }
-                        k += 1.0;
-                        pk *= lam / k;
-                        cdf += pk;
-                    }
-                } else {
-                    let u2 = fract(u * 113.37 + 0.71);
-                    k = max(lam + sqrt(lam) * sqrt(-2.0 * log(max(u, 1e-6))) * cos(6.2831853 * u2), 0.0);
-                }
-                let u3 = fract(u * 71.13 + 0.23);
-                // each glint's own brightness varies. GLINT_SHARE of the lobe is carried by the glints,
-                // the rest stays the smooth highlight: at 720p-1440p pixels a fully discrete path broke
-                // into black holes with capped spikes near the eye. Mean-preserving either way.
-                let glints = (k / lam) * mix(min(-log(max(u3, 1e-3)), 3.0) / 0.95, 1.0, min(k * 0.25, 1.0));
-                sunSpec = min(sunSpec * mix(1.0, glints, GLINT_SHARE), vec3<f32>(30000.0));
-            }
+        if (spec > 0.05) {
+            let sig = sqrt(max(alpha2, 1e-5) * 0.5);                  // per-axis facet slope spread
+            // the facet tilt that mirrors the sun, in a world-stable frame about the shading normal
+            let t1 = normalize(vec3<f32>(1.0, 0.0, 0.0) - N * N.x);
+            let t2 = cross(N, t1);
+            let hN = max(dot(H, N), 1e-3);
+            let need = vec2<f32>(dot(H, t1), dot(H, t2)) / hN;
+            let lod = max(log2(footprint * 1.5 / GLINT_CELL), 0.0);
+            let l0 = floor(lod);
+            let g0 = glintFacet(lagXZ, GLINT_CELL * exp2(l0), need, sig, footprint);
+            let g1 = glintFacet(lagXZ, GLINT_CELL * exp2(l0 + 1.0), need, sig, footprint);
+            let g = mix(g0, g1, lod - l0);
+            sunSpec = min(sunSpec * mix(1.0, g, GLINT_SHARE), vec3<f32>(30000.0));
         }
 #else
         let sunSpec = sunLight * min(spec, 400.0);

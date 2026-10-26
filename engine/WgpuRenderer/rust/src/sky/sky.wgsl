@@ -1730,6 +1730,16 @@ fn march_clouds(
     let ao_floor = mix(0.35, 0.7, cov);
 
     let ls_base = thick / f32(light_steps);
+#ifdef CLOUD_DECK
+    // (CLOUD-DECK) the per-ray part of the two-stream term, out of the sample loop: closed-deck vs
+    // broken-cumulus weighting, the sun's elevation over the deck (the shell is ~1-2 km up a 6371 km
+    // planet: the camera's vertical is the deck's), the side-lit cumulus factor, the neutral-cool colour
+    let deck_mu0 = max(dot(normalize(pos), sun), 0.0);
+    let deck_side = mix(0.12, 0.5, 1.0 - smoothstep(-0.6, 0.3, cos_t));
+    let deck_col = dot(sun_col, vec3<f32>(0.2126, 0.7152, 0.0722)) * vec3<f32>(0.93, 1.0, 1.09)
+        * mix(deck_side, deck_mu0 / PI, smoothstep(0.75, 0.95, cov));
+    let deck_up_k = 0.11 * thick * 0.35;
+#endif
 
     var col = vec3<f32>(0.0);
     var trans = 1.0;
@@ -1778,12 +1788,8 @@ fn march_clouds(
                 // with g ~ 0.85, fills the interior near-isotropically. A closed deck is a slab lit from
                 // above (E mu0 T_d / pi); broken cumulus are bright from the sunlit side and dark
                 // bodies with bright rims backlit. Neutral-cool: the mixed sun and sky at the cloud top.
-                let deck_slab = smoothstep(0.75, 0.95, cov);
                 let deck_td = 1.0 / (1.0 + 0.11 * od);
-                let deck_mu0 = max(dot(normalize(p), sun), 0.0);
-                let deck_side = mix(0.12, 0.5, 1.0 - smoothstep(-0.6, 0.3, cos_t));
-                let deck_diffuse = deck_td * mix(deck_side, deck_mu0 / PI, deck_slab) * (1.0 - exp(-0.15 * od));
-                direct += dot(sun_col, vec3<f32>(0.2126, 0.7152, 0.0722)) * vec3<f32>(0.93, 1.0, 1.09) * deck_diffuse;
+                direct += deck_col * (deck_td * (1.0 - exp(-0.15 * od)));
 #endif
             }
             // SKY-004: the identical march toward the MOON. Same steps, same growth, same
@@ -1815,7 +1821,7 @@ fn march_clouds(
             // height gradient as the sky ambient, so it cannot flatten the deck.
 #ifdef CLOUD_DECK
             // (CLOUD-DECK) the skylight filters down through the cloud above this sample (two-stream)
-            let deck_up = 1.0 / (1.0 + 0.11 * sigma * (1.0 - hfp) * thick * 0.35);
+            let deck_up = 1.0 / (1.0 + deck_up_k * sigma * (1.0 - hfp));
             let ambient = (amb_sky + amb_moon) * mix(ao_floor, 1.0, hfp) * deck_up;
 #else
             let ambient = (amb_sky + amb_moon) * mix(ao_floor, 1.0, hfp);
