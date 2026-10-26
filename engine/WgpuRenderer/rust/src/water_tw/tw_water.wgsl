@@ -38,44 +38,54 @@
 const FFT_SIZE: f32 = 256.0;
 const CASCADES: i32 = 4;
 // SEA-GLINTS: the share of the sun lobe the facets carry (the rest stays the smooth highlight),
-// the finest facet cell (m), a facet's glint tolerance in units of the slope spread, its radius in cells
-const GLINT_SHARE: f32 = 0.7;
+// the finest facet cell (m), a facet's glint tolerance in units of the slope spread, its radius in cells.
+// Tuned so a glint peaks near 6x the smooth highlight: sparser, brighter glints (20x and more) were
+// clipped white by the tone curve and took ~15% of the path's brightness with them.
+const GLINT_SHARE: f32 = 0.6;
 const GLINT_CELL: f32 = 0.05;
-const GLINT_TOL: f32 = 0.3;
-const GLINT_RADIUS: f32 = 0.3;
-fn glintHash(c: vec2<f32>, k: f32) -> f32 {
-    return fract(sin(dot(c, vec2<f32>(127.1, 311.7)) + k * 74.7) * 43758.5453);
+const GLINT_TOL: f32 = 0.5;
+const GLINT_RADIUS: f32 = 0.4;
+// integer hashes (Jarzynski & Olano 2020, pcg3d / pcg4d): a handful of integer ops where the
+// sin-based hash cost a sin each, and a facet needs eleven random numbers
+fn glintPcg3(v0: vec3<u32>) -> vec3<f32> {
+    var v = v0 * 1664525u + 1013904223u;
+    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+    v ^= v >> vec3<u32>(16u);
+    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+    return vec3<f32>(v >> vec3<u32>(8u)) * (1.0 / 16777216.0);
 }
-// a facet's tilt: an approximately unit-normal pair, re-drawn GLINT_RATE times a second and blended
-// between draws so it drifts rather than jumps
-fn glintTilt(c: vec2<f32>, t: f32) -> vec2<f32> {
-    let ph = glintHash(c, 9.0);
-    let tt = t * GLINT_RATE + ph;
-    let i = floor(tt);
-    let f = smoothstep(0.0, 1.0, tt - i);
-    var r = vec2<f32>(0.0);
-    for (var j = 0; j < 2; j++) {
-        let k = i + f32(j) * 1.0;
-        // sum of three uniforms, centred and scaled to unit variance: near enough to a normal draw
-        let x = (glintHash(c, k * 3.1 + 1.0) + glintHash(c, k * 3.1 + 2.0) + glintHash(c, k * 3.1 + 3.0) - 1.5) * 2.0;
-        let y = (glintHash(c, k * 5.3 + 4.0) + glintHash(c, k * 5.3 + 5.0) + glintHash(c, k * 5.3 + 6.0) - 1.5) * 2.0;
-        r += vec2<f32>(x, y) * select(1.0 - f, f, j == 1);
-    }
-    // two draws blended lose variance mid-way; restore it
-    return r / sqrt((1.0 - f) * (1.0 - f) + f * f);
+fn glintPcg4(v0: vec4<u32>) -> vec4<f32> {
+    var v = v0 * 1664525u + 1013904223u;
+    v.x += v.y * v.w; v.y += v.z * v.x; v.z += v.x * v.y; v.w += v.y * v.z;
+    v ^= v >> vec4<u32>(16u);
+    v.x += v.y * v.w; v.y += v.z * v.x; v.z += v.x * v.y; v.w += v.y * v.z;
+    return vec4<f32>(v >> vec4<u32>(8u)) * (1.0 / 16777216.0);
 }
 const GLINT_RATE: f32 = 3.0;
-// the glint of the facet in this pixel's cell of size `cell`, over its expected value: `need` is the
-// tilt that mirrors the sun, `sig` the facets' slope spread, `fp` the pixel footprint (m)
-fn glintFacet(xz: vec2<f32>, cell: f32, need: vec2<f32>, sig: f32, fp: f32) -> f32 {
-    let c = floor(xz / cell);
-    let centre = (c + 0.35 + 0.3 * vec2<f32>(glintHash(c, 1.7), glintHash(c, 2.9))) * cell;
+// the glint of the facet in this pixel's cell of size `cell` (octave `lvl`), over its expected
+// value: `need` is the tilt that mirrors the sun, `sig` the facets' slope spread, `fp` the footprint (m)
+fn glintFacet(xz: vec2<f32>, cell: f32, lvl: u32, need: vec2<f32>, sig: f32, fp: f32) -> f32 {
+    let cf = floor(xz / cell);
+    let cu = bitcast<vec2<u32>>(vec2<i32>(cf));
+    let h = glintPcg3(vec3<u32>(cu, lvl * 0x9E37u + 17u));
+    let centre = (cf + 0.4 + 0.2 * h.xy) * cell;
     let r = GLINT_RADIUS * cell;
     // the share of the pixel the facet disc covers: a soft disc whose edge widens with the footprint
     let d = length(xz - centre);
     let cover = clamp((r + 0.5 * fp - d) / max(fp, 1e-4), 0.0, 1.0) * min(r * r / max(0.25 * fp * fp, 1e-8), 1.0);
+    // the facet's tilt, re-drawn GLINT_RATE times a second and blended between draws so it drifts:
+    // each draw two sums of two uniforms (triangular, scaled to unit variance)
+    let tt = frame.ground_weather.w * GLINT_RATE + h.z;
+    let ti = u32(max(floor(tt), 0.0));
+    let tf = smoothstep(0.0, 1.0, fract(tt));
+    let q0 = glintPcg4(vec4<u32>(cu, ti, lvl));
+    let q1 = glintPcg4(vec4<u32>(cu, ti + 1u, lvl));
+    let d0 = vec2<f32>(q0.x + q0.y - 1.0, q0.z + q0.w - 1.0) * 2.449;
+    let d1 = vec2<f32>(q1.x + q1.y - 1.0, q1.z + q1.w - 1.0) * 2.449;
+    // two draws blended lose variance mid-way; restore it
+    let tilt = mix(d0, d1, tf) / sqrt((1.0 - tf) * (1.0 - tf) + tf * tf);
     let tau = GLINT_TOL * sig;
-    let off = glintTilt(c, frame.ground_weather.w) * sig - need;
+    let off = tilt * sig - need;
     let w = exp(-dot(off, off) / (2.0 * tau * tau));
     // expected glint at this `need` over the random tilt: the facet-tilt Gaussian (sig) convolved
     // with the tolerance (tau); times the disc's expected cover of a pixel. Dividing by it keeps the
@@ -83,7 +93,7 @@ fn glintFacet(xz: vec2<f32>, cell: f32, need: vec2<f32>, sig: f32, fp: f32) -> f
     let e2 = sig * sig + tau * tau;
     let ew = tau * tau / e2 * exp(-dot(need, need) / (2.0 * e2));
     let ec = 3.14159265 * (r + 0.25 * fp) * (r + 0.25 * fp) / (cell * cell);
-    return min(w * cover / max(ew * min(ec, 1.0), 1e-4), 60.0);
+    return min(w * cover / max(ew * min(ec, 1.0), 1e-4), 30.0);
 }
 
 override linear: f32 = 1.0;
@@ -1122,8 +1132,8 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
             let need = vec2<f32>(dot(H, t1), dot(H, t2)) / hN;
             let lod = max(log2(footprint * 1.5 / GLINT_CELL), 0.0);
             let l0 = floor(lod);
-            let g0 = glintFacet(lagXZ, GLINT_CELL * exp2(l0), need, sig, footprint);
-            let g1 = glintFacet(lagXZ, GLINT_CELL * exp2(l0 + 1.0), need, sig, footprint);
+            let g0 = glintFacet(lagXZ, GLINT_CELL * exp2(l0), u32(l0), need, sig, footprint);
+            let g1 = glintFacet(lagXZ, GLINT_CELL * exp2(l0 + 1.0), u32(l0) + 1u, need, sig, footprint);
             let g = mix(g0, g1, lod - l0);
             sunSpec = min(sunSpec * mix(1.0, g, GLINT_SHARE), vec3<f32>(30000.0));
         }
