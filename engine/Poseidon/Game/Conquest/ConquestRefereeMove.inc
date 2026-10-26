@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Getting squads out of vehicles and unstuck: Dismount, InGroundVehicle, Detour. Included by
+// Getting squads out of vehicles and unstuck (Dismount, InGroundVehicle, Detour), helicopters home, parking. Included by
 // ConquestReferee.cpp inside its anonymous namespace, before TrackGroups, which uses them.
 
 // Out of the vehicles: everyone of a truck or APC squad; from a helicopter only the passengers, and the
@@ -149,4 +149,58 @@ void TrackFerry(Referee& r, GroupRecord& rec, float now)
         grp->Move(grp->MainSubgroup(), rec.destination, Command::Undefined);
         rec.orderedAt = now;
     }
+}
+
+Vector3 ParkingSlot(Referee& r, int side, int o, bool big)
+{
+    if (r.parked.size() != r.war.defs.size())
+        r.parked.assign(r.war.defs.size(), 0);
+    float fx, fy;
+    FrontDir(r, side, o, fx, fy);
+    const ObjectiveDef& d = r.war.defs[o];
+    const float baseHeight = GLandscape ? GLandscape->SurfaceY(d.x, d.y) : 0.0f;
+    // A slot a vehicle can drive away from: dry land at least 3 m above the sea (a helicopter parked in the
+    // surf behind Morton counted as unusable), level (no steeper than 0.15 over 12 m), and no more than 8 m
+    // below or above the base -- behind Morton the ground drops as a cliff to the beach, and the trucks parked
+    // at its foot never climbed out (soak, 2026-10-27). Nor one a vehicle still stands in: the slots used to be
+    // handed out in turn, and a new truck appeared on top of one that had not left. Behind the base first, then
+    // beside it; with nothing suitable, beside the base's spawn point as it used to.
+    const auto suitable = [&](float x, float y)
+    {
+        if (!GLandscape)
+            return true;
+        const float h = GLandscape->SurfaceY(x, y);
+        const float sx = GLandscape->SurfaceY(x + 6.0f, y) - GLandscape->SurfaceY(x - 6.0f, y);
+        const float sy = GLandscape->SurfaceY(x, y + 6.0f) - GLandscape->SurfaceY(x, y - 6.0f);
+        if (h < 3.0f || std::abs(h - baseHeight) > 8.0f || std::max(std::abs(sx), std::abs(sy)) > 0.15f * 12.0f)
+            return false;
+        const float clear = big ? 20.0f : 12.0f;
+        return std::none_of(r.units.begin(), r.units.end(),
+                            [&](const UnitRecord& u)
+                            {
+                                const EntityAI* v = u.unit;
+                                return u.vehicle && v && !v->IsDammageDestroyed() &&
+                                       std::hypot(v->Position().X() - x, v->Position().Z() - y) < clear;
+                            });
+    };
+    // Behind the base (away from the front), then to its left and its right.
+    const float dirs[3][2] = {{-fx, -fy}, {-fy, fx}, {fy, -fx}};
+    for (const auto& dir : dirs)
+    {
+        const float bx = dir[0], by = dir[1];
+        const float px = -by, py = bx; // across that direction
+        for (int tries = 0; tries < 30; tries++)
+        {
+            const int slot = r.parked[o]++ % 30;
+            const int row = slot / 6, col = slot % 6;
+            const float lateral = (col % 2 ? 1.0f : -1.0f) * (static_cast<float>(col / 2) + 0.5f) * (big ? 45.0f : 28.0f);
+            const float out = d.radius * 0.6f + 30.0f + static_cast<float>(row) * 35.0f;
+            const float x = d.x + bx * out + px * lateral, y = d.y + by * out + py * lateral;
+            if (suitable(x, y))
+                return Ground(x, y);
+        }
+    }
+    const Vector3 at = SpawnPoint(r, side, o);
+    const float off = 14.0f * static_cast<float>(r.parked[o] % 6 + 1);
+    return Ground(at.X() + off, at.Z() + off * 0.5f);
 }

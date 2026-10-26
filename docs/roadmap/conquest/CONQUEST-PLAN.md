@@ -913,3 +913,10 @@ Later the same night (the owner asleep, soaks only):
   a dozen at once and they jammed the roads out of their HQ.
 - **"Out of map"** (OperMap path planning falling back to a straight path) now names the unit and its fields,
   to find what plans from outside the map (27 in one second once, after a supply truck backed off).
+- **Parking at Morton**: behind Morton the ground drops as a cliff to the beach; trucks parked at its foot
+  (10 m below the base, slopes up to 0.46) never climbed out -- the soaks' stuck squads stood there, war after
+  war. A parking slot must be level (0.15) and within 8 m of the base's height, and free; behind the base
+  first, then beside it. A 120-minute soak: no vehicle stuck at Morton (12 back-offs over the whole map).
+- **Helicopters stood down** once still for 5 s under 8 m near home (a Mi-17's origin stands 4.4 m up).
+- Balance, open: EAST has won the last six AI-only soaks on Everon (it holds more towns near its Airfield).
+  The setup screen's uneven supplies can even it; no tuning yet.
