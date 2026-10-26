@@ -2496,11 +2496,15 @@ void SetOptions(const Options& options)
     Referee& r = R();
     const int side = r.options.side;
     const bool start = r.options.startInCommand;
+    const FogMode fog = r.options.fog;
     r.options = options;
     if (r.started)
     {
+        // Fixed once the war runs: the side, the start, and the fog of war (a mid-game switch off the
+        // shroud would show what the side has not seen).
         r.options.side = side;
         r.options.startInCommand = start;
+        r.options.fog = fog;
     }
 }
 

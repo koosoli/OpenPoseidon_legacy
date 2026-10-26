@@ -1457,7 +1457,7 @@ void DrawSquadList(const Snapshot& snap, const std::vector<SquadDraw>& squads)
     const ImGuiIO& io = ImGui::GetIO();
     // Above the minimap, never over it.
     if (BeginPanel("##conquest_squads", ImVec2(14.0f, 96.0f), ImVec2(0.0f, 0.0f),
-                   ImVec2(260.0f, std::max(120.0f, io.DisplaySize.y - 96.0f - 262.0f))))
+                   ImVec2(260.0f, std::max(120.0f, io.DisplaySize.y - 96.0f - 254.0f))))
     {
         char count[32];
         std::snprintf(count, sizeof(count), "%d", static_cast<int>(squads.size()));
@@ -1704,11 +1704,10 @@ void DrawOptions()
         ImGui::Spacing();
         Options o = GetOptions();
         bool changed = false;
-        Label(Font().body, 13.0f, ColMuted, "Fog of war");
-        changed |= ImGui::RadioButton("Contacts: enemies only as your side knows them", o.fog == FogMode::Contacts) &&
-                   (o.fog = FogMode::Contacts, true);
-        changed |= ImGui::RadioButton("Shroud: unexplored ground stays black", o.fog == FogMode::Shroud) &&
-                   (o.fog = FogMode::Shroud, true);
+        // The fog of war is chosen before the war (the setup screen), never during it: switching it
+        // off mid-game would show what the side has not seen.
+        Label(Font().body, 13.0f, ColMuted, o.fog == FogMode::Shroud ? "Fog of war: shroud (set before the war)"
+                                                                     : "Fog of war: contacts (set before the war)");
         ImGui::Spacing();
         changed |= ImGui::Checkbox("Taking control of soldiers", &o.possession);
         changed |= ImGui::Checkbox("HQ radios its orders when you are not in command", &o.hqRadio);
@@ -1922,7 +1921,15 @@ void DrawMinimap(const Snapshot& snap, const std::vector<SquadDraw>& squads)
         return;
     const ImGuiIO& io = ImGui::GetIO();
     const float size = WorldSize();
-    if (!BeginPanel("##conquest_minimap", ImVec2(14.0f, io.DisplaySize.y - 14.0f), ImVec2(0.0f, 1.0f)))
+    ImGui::SetNextWindowPos(ImVec2(14.0f, io.DisplaySize.y - 14.0f), ImGuiCond_Always, ImVec2(0.0f, 1.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    const bool open = ImGui::Begin("##conquest_minimap", nullptr,
+                                   ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                                       ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav |
+                                       ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoBackground);
+    ImGui::PopStyleVar(2);
+    if (!open)
     {
         ImGui::End();
         return;
@@ -2019,7 +2026,6 @@ void DrawMinimap(const Snapshot& snap, const std::vector<SquadDraw>& squads)
         if (sel)
             draw->AddCircle(p, 5.0f, ColSelect, 12, 1.2f);
     }
-    draw->AddRect(at, ImVec2(at.x + MiniSize, at.y + MiniSize), ColEdge, 0.0f, 0, 1.0f);
     ImGui::End();
 }
 } // namespace
