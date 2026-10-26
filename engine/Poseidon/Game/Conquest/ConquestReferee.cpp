@@ -100,6 +100,7 @@ struct GroupRecord
     int supplyPin = -1;          // ... the base the commander sent it to (else the neediest)
     bool supplyDuty = false;     // a fighting squad the commander put on supply runs
     bool truckless = false;      // a supply squad whose truck is gone: it fights on foot
+    bool ferry = false;          // an AI air assault's helicopter flying home after unloading (its pilot's group)
     std::string engageName;      // the building or vehicle the commander told it to attack
     std::string netDoing;        // a client: what the server says it is doing
     int nudges = 0;
@@ -241,6 +242,7 @@ struct Referee
     War war;
     std::vector<GroupRecord> groups;
     std::vector<UnitRecord> units;
+    std::map<int, float> aiBoughtAt; // objective -> when an AI commander last bought a squad there
     std::array<float, MaxSides> lastPlan{};
     std::array<bool, MaxSides> replan{};
     std::array<int, MaxSides> live{};
@@ -1354,6 +1356,7 @@ bool InContact(const Referee& r, int side, const Vector3& pos)
 
 void TrackGroups(Referee& r, float now)
 {
+    std::vector<GroupRecord> born; // helicopters sent home: added after the loop (it holds references)
     for (size_t i = 0; i < r.groups.size();)
     {
         GroupRecord& rec = r.groups[i];
@@ -1363,6 +1366,12 @@ void TrackGroups(Referee& r, float now)
             if (grp && grp->NUnits() == 0)
                 grp->RemoveFromCenter();
             r.groups.erase(r.groups.begin() + static_cast<std::ptrdiff_t>(i));
+            continue;
+        }
+        if (rec.ferry)
+        {
+            TrackFerry(r, rec, now);
+            i++;
             continue;
         }
         // Mounted squads get out once they are close: a truck is not a place to fight from. Tank and
@@ -1385,7 +1394,10 @@ void TrackGroups(Referee& r, float now)
             for (int id = 1; id <= MAX_UNITS_PER_GROUP; id++)
                 if (AIUnit* unit = grp->UnitWithID(id); unit && unit->GetVehicleIn() == heli && heli->Driver() != unit->GetPerson())
                     aboard = true;
-            if (!aboard)
+            GroupRecord ferry;
+            if (!aboard && !Human(r, rec.side) && SendHelicopterHome(r, rec, heli, now, ferry))
+                born.push_back(ferry);
+            else if (!aboard)
             {
                 heli->LandStarted(Transport::LMLand);
                 rec.parkedHeli = true;
@@ -1533,6 +1545,8 @@ void TrackGroups(Referee& r, float now)
         }
         i++;
     }
+    for (GroupRecord& ferry : born)
+        r.groups.push_back(std::move(ferry));
 }
 
 SideView BuildView(Referee& r, int side, float now)
@@ -1569,8 +1583,8 @@ SideView BuildView(Referee& r, int side, float now)
         }
     for (const GroupRecord& rec : r.groups)
     {
-        if (rec.side != side || IsSupply(r, rec))
-            continue; // supply squads run the supply line, not the planner's tasks
+        if (rec.side != side || IsSupply(r, rec) || rec.ferry)
+            continue; // supply squads run the supply line, not the planner's tasks (nor does a helicopter going home)
         AIGroup* grp = rec.group;
         if (!grp || !grp->Leader())
             continue;
@@ -1701,6 +1715,10 @@ void Plan(Referee& r, int side, float now)
                 continue;
             }
             int base = intent.objective;
+            // One squad a base every 30 s: rich at the start, the AI bought a dozen at once and they jammed
+            // the roads out of their HQ (soak, 2026-10-26).
+            if (const auto it = r.aiBoughtAt.find(base); it != r.aiBoughtAt.end() && now >= it->second && now - it->second < 30.0f)
+                continue;
             int type = ChooseSquadType(r, side, base);
             if (type < 0 && base != HqOf(r, side) && HqOf(r, side) >= 0 &&
                 SpawnEligible(r.war, side, HqOf(r, side), now, r.tuning))
@@ -1711,8 +1729,11 @@ void Plan(Referee& r, int side, float now)
             if (type < 0)
                 continue;
             intent.objective = base;
+            if (const auto it = r.aiBoughtAt.find(base); it != r.aiBoughtAt.end() && now >= it->second && now - it->second < 30.0f)
+                continue; // the HQ, taking over from a front base without supplies, bought one just now
             if (SpawnSquad(r, side, base, false, type))
             {
+                r.aiBoughtAt[base] = now;
                 WarLog(Name(side) + " bought a " + r.config.squads[type].name + " at " +
                        r.war.defs[intent.objective].name + " (" + intent.why + ")");
                 if (r.llmBuy[side] == r.config.squads[type].name)
@@ -2871,6 +2892,7 @@ LSError SerializeSaved(ParamArchive& ar, Saved& w)
         PARAM_CHECK(sub.Serialize("type", g.type, 1, 0))
         PARAM_CHECK(sub.Serialize("onFoot", g.onFoot, 1, false))
         PARAM_CHECK(sub.Serialize("truckless", g.truckless, 1, false))
+        PARAM_CHECK(sub.Serialize("ferry", g.ferry, 1, false))
         PARAM_CHECK(sub.Serialize("parkedHeli", g.parkedHeli, 1, false))
         g.task = static_cast<TaskKind>(task);
         ar.CloseSubclass(sub);
@@ -4113,6 +4135,8 @@ std::string Doing(const Referee& r, const GroupRecord& rec)
     const auto name = [&](int o)
     { return o >= 0 && o < static_cast<int>(r.war.defs.size()) ? r.war.defs[o].name : std::string("?"); };
     std::string text;
+    if (rec.ferry)
+        return rec.landing ? "Helicopter landing at the HQ" : "Helicopter flying back to the HQ";
     if (IsSupply(r, rec))
     {
         if (rec.supplyState == 1)

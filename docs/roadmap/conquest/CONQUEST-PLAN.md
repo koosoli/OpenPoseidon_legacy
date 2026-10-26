@@ -900,3 +900,16 @@ pre-existing `[ai]` unit test "EntityEvent enum names" failure; neither is from 
 
 Tests: `mouse_wheel` harness command and `conquestCameraState`; the feature test checks the wheel, Tab and
 T on a non-leader, the radio answer (offline Windows voices) and the AI taking over.
+
+Later the same night (the owner asleep, soaks only):
+
+- **Fire support, the real cause**: a contact's height is above sea level, and the AI skipped "aircraft" over
+  15 m -- on Everon nearly every enemy. Now height above the ground: 7-8 barrages in a war (none before).
+- **Air assault helicopters go home**: on an AI side, once its passengers are out, the pilot leaves the squad
+  with the helicopter, flies it back to the HQ, lands, and is stood down (30% of the squad's price back). No
+  helicopter waits by a town, and the squad goes on under its next leader (the pilot often led it). Under a
+  human commander it still sets down by the squad, for the commander's Board order.
+- **AI purchases spaced**: one squad a base every 30 game seconds. Rich at the start (2000), the AI bought
+  a dozen at once and they jammed the roads out of their HQ.
+- **"Out of map"** (OperMap path planning falling back to a straight path) now names the unit and its fields,
+  to find what plans from outside the map (27 in one second once, after a supply truck backed off).
