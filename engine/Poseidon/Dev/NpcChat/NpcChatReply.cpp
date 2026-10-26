@@ -160,6 +160,8 @@ OrderKind ParseOrderKind(const std::string& name)
         return OrderKind::LineUp;
     if (OneOf(n, {"get_out", "getout", "dismount", "disembark", "eject"}))
         return OrderKind::GetOut;
+    if (OneOf(n, {"priority", "main_effort", "focus", "hq_priority"}))
+        return OrderKind::Priority;
     return OrderKind::Invalid;
 }
 
@@ -182,12 +184,15 @@ const char* OrderKindName(OrderKind kind)
         case OrderKind::GetIn: return "get_in";
         case OrderKind::GetOut: return "get_out";
         case OrderKind::LineUp: return "line_up";
+        case OrderKind::Priority: return "priority";
         default: return "invalid";
     }
 }
 
 std::string NormaliseOrderValue(OrderKind kind, const std::string& value)
 {
+    if (kind == OrderKind::Priority)
+        return Trim(value); // an objective's name, checked by Conquest itself
     std::string v = Upper(Trim(value));
     std::replace(v.begin(), v.end(), '_', ' ');
     switch (kind)
@@ -368,9 +373,10 @@ bool ParseReply(const std::string& text, const std::string& fallbackSpeaker, Rep
         const std::string rawValue = StringField(item, "value");
         order.value = NormaliseOrderValue(order.kind, rawValue);
 
-        bool ok = order.kind != OrderKind::Invalid && (order.all || !order.to.empty());
+        bool ok = order.kind != OrderKind::Invalid && (order.all || !order.to.empty() || order.kind == OrderKind::Priority);
         switch (order.kind)
         {
+            case OrderKind::Priority: ok = ok && !order.value.empty(); break;
             case OrderKind::Stance:
             case OrderKind::CombatMode:
             case OrderKind::Behaviour:

@@ -74,7 +74,7 @@ int DominantSide(const Presence& presence, int sideCount, const Tuning& tuning, 
     {
         if (side == best || presence.strength[side] <= 0.0f)
             continue;
-        if (presence.strength[best] < tuning.dominanceRatio * presence.strength[side])
+        if (presence.strength[best] <= tuning.dominanceRatio * presence.strength[side])
         {
             contested = true;
             return NoSide;
@@ -82,6 +82,15 @@ int DominantSide(const Presence& presence, int sideCount, const Tuning& tuning, 
     }
     (void)present;
     return best;
+}
+
+float CaptureMargin(const Presence& presence, int sideCount, int side)
+{
+    float other = 0.0f;
+    for (int s = 0; s < sideCount; s++)
+        if (s != side)
+            other = std::max(other, presence.strength[s]);
+    return std::max(0.0f, presence.strength[side] - other);
 }
 
 CaptureResult StepCapture(War& war, int index, const Presence& presence, float dt, float now, const Tuning& tuning)
@@ -115,7 +124,7 @@ CaptureResult StepCapture(War& war, int index, const Presence& presence, float d
     // The owner standing on its own objective restores its bar.
     if (side == s.owner)
     {
-        const float rate = 1.0f / CaptureSeconds(presence.strength[side], tuning);
+        const float rate = 1.0f / CaptureSeconds(CaptureMargin(presence, war.sideCount, side), tuning);
         if (s.holder == side)
             s.level = std::min(1.0f, s.level + rate * dt);
         else
@@ -133,7 +142,7 @@ CaptureResult StepCapture(War& war, int index, const Presence& presence, float d
     if (!CanAttack(war, side, index))
         return result; // not on this side's front line: no progress
 
-    const float rate = 1.0f / CaptureSeconds(presence.strength[side], tuning);
+    const float rate = 1.0f / CaptureSeconds(CaptureMargin(presence, war.sideCount, side), tuning);
     if (s.holder == side)
     {
         s.level += rate * dt;

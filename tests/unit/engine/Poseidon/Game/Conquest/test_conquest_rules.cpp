@@ -105,17 +105,29 @@ TEST_CASE("conquest: an owned objective is neutralised, then captured", "[conque
     CHECK(war.states[3].owner == 0);
 }
 
-TEST_CASE("conquest: contest needs 2:1, one straggler cannot freeze a squad", "[conquest]")
+TEST_CASE("conquest: the side with more soldiers in the zone captures; a tie freezes it", "[conquest]")
 {
     War war = LineWar();
     float now = 0.0f;
-    Hold(war, 1, Men(4, 3), 30.0f, now);
+    Hold(war, 1, Men(3, 3), 30.0f, now);
     CHECK(war.states[1].contested);
     CHECK(war.states[1].level == 0.0f);
-    Hold(war, 1, Men(8, 1), 10.0f, now);
+    Hold(war, 1, Men(4, 3), 10.0f, now);
     CHECK_FALSE(war.states[1].contested);
     CHECK(war.states[1].holder == 0);
     CHECK(war.states[1].level > 0.0f);
+}
+
+TEST_CASE("conquest: capture speed follows the margin, not the head count", "[conquest]")
+{
+    // 8 against 3 is as fast as 5 alone; 8 alone is faster.
+    War a = LineWar(), b = LineWar(), c = LineWar();
+    float t1 = 0.0f, t2 = 0.0f, t3 = 0.0f;
+    Hold(a, 1, Men(8, 3), 10.0f, t1);
+    Hold(b, 1, Men(5, 0), 10.0f, t2);
+    Hold(c, 1, Men(8, 0), 10.0f, t3);
+    CHECK(a.states[1].level == Catch::Approx(b.states[1].level));
+    CHECK(c.states[1].level > a.states[1].level);
 }
 
 TEST_CASE("conquest: abandoned progress decays back", "[conquest]")

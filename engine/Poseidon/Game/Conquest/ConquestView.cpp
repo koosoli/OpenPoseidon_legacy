@@ -18,6 +18,9 @@
 
 #include <Poseidon/Game/Conquest/ConquestView.hpp>
 #include <Poseidon/Game/Conquest/ConquestReferee.hpp>
+#include <Poseidon/Dev/NpcChat/NpcChat.hpp>
+#include <Poseidon/Dev/NpcChat/NpcChatSecrets.hpp>
+#include <Poseidon/Dev/NpcChat/NpcChatSettings.hpp>
 
 #include <Poseidon/AI/AIGroup.hpp>
 #include <Poseidon/AI/AIUnit.hpp>
@@ -45,6 +48,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <map>
+#include <array>
 #include <string>
 #include <vector>
 
@@ -190,6 +195,7 @@ struct State
     bool optionsOpen = false;
     bool deployOpen = false; // the DEPLOY / SUPPORT panel (B, or the top bar's Deploy)
     bool helpOpen = false;   // the controls row (H)
+    bool voiceOpen = false;  // the AI & voice panel (HQ conversation, the LLM, voice in and out)
     std::vector<ImU32> miniColours; // the minimap's ground, MiniCells x MiniCells, north up
     int miniCells = 0;
     bool setupGrab = false;  // the setup screen freed the mouse
@@ -1691,6 +1697,176 @@ void DrawDeploy(const Snapshot& snap)
     ImGui::End();
 }
 
+// ---- AI & voice: the player-facing face of NPC chat (the dev panel's NPC chat tab writes the same
+// npcChat.json and the same key store: one settings struct, two views) ----
+
+const char* LinkWord(const NpcChat::LinkStatus& status)
+{
+    switch (status.state)
+    {
+        case NpcChat::LinkState::Ok: return "connected";
+        case NpcChat::LinkState::Failed: return "failed";
+        case NpcChat::LinkState::Checking: return "checking...";
+        case NpcChat::LinkState::Unknown: break;
+    }
+    return "not checked";
+}
+
+ImU32 LinkColour(const NpcChat::LinkStatus& status)
+{
+    return status.state == NpcChat::LinkState::Ok       ? ColGood
+           : status.state == NpcChat::LinkState::Failed ? ColBad
+                                                        : ColMuted;
+}
+
+template <typename Enum>
+bool ProviderCombo(const char* label, Enum& value, const char* (*name)(Enum))
+{
+    bool changed = false;
+    if (ImGui::BeginCombo(label, name(value)))
+    {
+        for (int i = 0; i < static_cast<int>(Enum::Count); i++)
+        {
+            const Enum e = static_cast<Enum>(i);
+            if (ImGui::Selectable(name(e), e == value))
+            {
+                value = e;
+                changed = true;
+            }
+        }
+        ImGui::EndCombo();
+    }
+    return changed;
+}
+
+// One key field: typed keys are held for the session (and stored encrypted only with "Remember").
+void KeyField(const char* id, const std::string& slot)
+{
+    if (slot.empty())
+        return;
+    static std::map<std::string, std::array<char, 256>> buffers;
+    auto& buffer = buffers[slot];
+    ImGui::PushID(id);
+    const bool hasKey = NpcChat::HasPanelKey(slot) || NpcChat::HasEnvKey(slot);
+    ImGui::SetNextItemWidth(250.0f);
+    ImGui::InputTextWithHint("##key", hasKey ? "key set (type to replace)" : "paste your API key", buffer.data(),
+                             buffer.size(), ImGuiInputTextFlags_Password);
+    ImGui::SameLine();
+    if (ImGui::Button("Use key") && buffer[0])
+    {
+        NpcChat::SetKey(slot, NpcChat::SanitizeKey(buffer.data()));
+        buffer.fill(0);
+        std::string error;
+        NpcChat::PersistKeys(NpcChat::CurrentSettings().rememberKeys, error);
+    }
+    ImGui::PopID();
+}
+
+void DrawVoicePanel()
+{
+    State& s = St();
+    if (!s.voiceOpen)
+        return;
+    const ImGuiIO& io = ImGui::GetIO();
+    NpcChat::Settings& cfg = NpcChat::CurrentSettings();
+    bool changed = false;
+    if (BeginPanel("##conquest_voice", ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImVec2(0.5f, 0.5f)))
+    {
+        Label(Font().display, 22.0f, ColText, "AI & VOICE");
+        Label(Font().body, 13.0f, ColMuted, "Talk to HQ and your squad, and let an AI model command a side.");
+        if (GWorld && GWorld->GetMode() == GModeNetware)
+            Label(Font().body, 13.0f, ColWarn, "Talking to HQ is single player only; the LLM commander runs on the server.");
+        ImGui::Spacing();
+        // The settings scroll; Close stays in view at any window height.
+        ImGui::BeginChild("##voice_settings", ImVec2(520.0f, std::min(470.0f, io.DisplaySize.y - 190.0f)));
+
+        Heading("CONVERSATION");
+        changed |= ImGui::Checkbox("Talk to HQ and the squad (Insert: type, hold Caps Lock: speak)", &cfg.enabled);
+
+        ImGui::Spacing();
+        Heading("LANGUAGE MODEL");
+        changed |= ProviderCombo("Provider##llm", cfg.llm, NpcChat::LlmProviderName);
+        {
+            static std::array<char, 128> model{};
+            if (model[0] == 0)
+                std::snprintf(model.data(), model.size(), "%s", cfg.llmModel.c_str());
+            ImGui::SetNextItemWidth(250.0f);
+            if (ImGui::InputTextWithHint("Model##llm", cfg.EffectiveLlmModel().c_str(), model.data(), model.size()))
+            {
+                cfg.llmModel = model.data();
+                changed = true;
+            }
+        }
+        if (cfg.llm == NpcChat::LlmProvider::Ollama || cfg.llm == NpcChat::LlmProvider::Custom)
+        {
+            static std::array<char, 256> url{};
+            if (url[0] == 0)
+                std::snprintf(url.data(), url.size(), "%s", cfg.llmBaseUrl.c_str());
+            ImGui::SetNextItemWidth(250.0f);
+            if (ImGui::InputTextWithHint("Address##llm", cfg.EffectiveLlmBaseUrl().c_str(), url.data(), url.size()))
+            {
+                cfg.llmBaseUrl = url.data();
+                changed = true;
+            }
+        }
+        KeyField("llmkey", NpcChat::LlmKeySlot(cfg.llm));
+        if (ImGui::Button("Check##llm"))
+            NpcChat::CheckLlm();
+        ImGui::SameLine();
+        Label(Font().body, 13.0f, LinkColour(NpcChat::LlmStatus()), LinkWord(NpcChat::LlmStatus()));
+        if (!NpcChat::LlmStatus().message.empty() && NpcChat::LlmStatus().state == NpcChat::LinkState::Failed)
+            Label(Font().body, 12.0f, ColMuted, NpcChat::LlmStatus().message.substr(0, 90).c_str());
+
+        ImGui::Spacing();
+        Heading("VOICE INPUT (SPEECH TO TEXT)");
+        changed |= ProviderCombo("Provider##stt", cfg.stt, NpcChat::SttProviderName);
+        if (cfg.stt != NpcChat::SttProvider::Off)
+        {
+            KeyField("sttkey", NpcChat::SttKeySlot(cfg.stt));
+            if (ImGui::Button("Check##stt"))
+                NpcChat::CheckStt();
+            ImGui::SameLine();
+            Label(Font().body, 13.0f, LinkColour(NpcChat::SttStatus()), LinkWord(NpcChat::SttStatus()));
+            Label(Font().body, 12.0f, ColMuted, "Hold Caps Lock in game and speak; release to send.");
+        }
+
+        ImGui::Spacing();
+        Heading("VOICE OUTPUT (TEXT TO SPEECH)");
+        changed |= ProviderCombo("Provider##tts", cfg.tts, NpcChat::TtsProviderName);
+        if (cfg.tts != NpcChat::TtsProvider::Off)
+        {
+            if (cfg.tts != NpcChat::TtsProvider::WindowsSapi)
+                KeyField("ttskey", NpcChat::TtsKeySlot(cfg.tts));
+            ImGui::SetNextItemWidth(250.0f);
+            changed |= ImGui::SliderFloat("Volume##tts", &cfg.ttsVolume, 0.0f, 1.0f, "%.2f");
+            changed |= ImGui::Checkbox("Radio voice when far away", &cfg.ttsRadioWhenFar);
+            if (ImGui::Button("Test voice"))
+                NpcChat::TestVoice();
+            ImGui::SameLine();
+            if (ImGui::Button("Check##tts"))
+                NpcChat::CheckTts();
+            ImGui::SameLine();
+            Label(Font().body, 13.0f, LinkColour(NpcChat::TtsStatus()), LinkWord(NpcChat::TtsStatus()));
+        }
+
+        ImGui::Spacing();
+        changed |= ImGui::Checkbox("Remember keys on this PC (encrypted for your Windows account)", &cfg.rememberKeys);
+        if (!NpcChat::StatusLine().empty())
+            Label(Font().body, 12.0f, ColMuted, NpcChat::StatusLine().substr(0, 100).c_str());
+        ImGui::EndChild();
+        ImGui::Spacing();
+        if (ImGui::Button("Close"))
+            s.voiceOpen = false;
+    }
+    ImGui::End();
+    if (changed)
+    {
+        NpcChat::SaveSettings();
+        std::string error;
+        NpcChat::PersistKeys(cfg.rememberKeys, error);
+    }
+}
+
 // The war's options, from the top bar's Options button.
 void DrawOptions()
 {
@@ -1713,6 +1889,15 @@ void DrawOptions()
         changed |= ImGui::Checkbox("HQ radios its orders when you are not in command", &o.hqRadio);
         if (changed)
             SetOptions(o);
+        ImGui::Spacing();
+        for (int side = 0; side < static_cast<int>(SideNames().size()); side++)
+        {
+            const std::string line = SideTitle(side) + " commander: " + (o.llmCommander[side] ? "LLM (Hybrid)" : "Standard AI") +
+                                     " (set before the war)";
+            Label(Font().body, 13.0f, ColMuted, line.c_str());
+        }
+        if (ImGui::Button("AI & voice..."))
+            s.voiceOpen = true;
         ImGui::Spacing();
         if (ImGui::Button("Close"))
             s.optionsOpen = false;
@@ -1739,6 +1924,9 @@ void DrawSetup()
         Label(Font().body, 14.0f, ColMuted, "Take the towns' command posts. The side whose war score runs out loses.");
         ImGui::Spacing();
         ImGui::Spacing();
+        // Two columns, so the whole screen fits a 720p window: the side and the start on the left,
+        // the options and the commanders on the right, the buttons underneath.
+        ImGui::BeginGroup();
         Heading("YOUR SIDE");
         ImGui::Spacing();
         const std::vector<std::string> sides = SideNames();
@@ -1776,7 +1964,9 @@ void DrawSetup()
             o.startInCommand = true;
             o.commanderView = true;
         }
-        ImGui::Spacing();
+        ImGui::EndGroup();
+        ImGui::SameLine(0.0f, 40.0f);
+        ImGui::BeginGroup();
         Heading("OPTIONS");
         ImGui::Spacing();
         if (ImGui::Checkbox("Commander view (Ctrl+M: the top-down strategy view)", &o.commanderView) && !o.commanderView)
@@ -1788,6 +1978,19 @@ void DrawSetup()
             o.fog = FogMode::Shroud;
         ImGui::Checkbox("Taking control of any of your soldiers", &o.possession);
         ImGui::Checkbox("HQ radios its orders", &o.hqRadio);
+        ImGui::Spacing();
+        Heading("COMMANDERS");
+        Label(Font().body, 12.0f, ColMuted, "An LLM sets the priorities; the standard AI does the rest.");
+        for (size_t i = 0; i < sides.size(); i++)
+        {
+            ImGui::PushID(static_cast<int>(i) + 100);
+            bool llm = o.llmCommander[i];
+            const std::string label = SideTitle(static_cast<int>(i)) + ": LLM commander (Hybrid)";
+            if (ImGui::Checkbox(label.c_str(), &llm))
+                o.llmCommander[i] = llm;
+            ImGui::PopID();
+        }
+        ImGui::EndGroup();
         ImGui::Spacing();
         ImGui::Spacing();
         ImGui::PushStyleColor(ImGuiCol_Button, SideColour(o.side, 0.85f));
@@ -1806,6 +2009,9 @@ void DrawSetup()
         }
         ImGui::PopFont();
         ImGui::PopStyleColor(2);
+        ImGui::SameLine(0.0f, 16.0f);
+        if (ImGui::Button("AI & voice..."))
+            s.voiceOpen = true;
     }
     ImGui::End();
 }
@@ -2315,6 +2521,7 @@ void Frame()
         }
         PushTheme();
         DrawSetup();
+        DrawVoicePanel();
         PopTheme();
         return;
     }
@@ -2380,6 +2587,7 @@ void Frame()
     DrawCommandBar(squads);
     DrawMinimap(snap, squads);
     DrawOptions();
+    DrawVoicePanel();
     DrawToast();
     PopTheme();
 }

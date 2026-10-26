@@ -63,7 +63,8 @@ struct Tuning
 {
     float baseCaptureSeconds = 90.0f; // one full bar for a four-man strength
     float decayFactor = 0.25f;        // abandoned progress returns at this fraction of the base rate
-    float dominanceRatio = 2.0f;      // a side progresses only with this multiple of every other side
+    float dominanceRatio = 1.0f;      // a side progresses with more than this multiple of every other side
+                                      // (1: a plain majority; the owner, 2026-10-26: "the one with more soldiers captures")
     float settleSeconds = 60.0f;      // no spawning at a freshly captured objective for this long
     float hitMemorySeconds = 60.0f;   // no spawning this long after a friendly was hit there
     float securityRadius = 400.0f;    // enemies inside this block spawning (see ObjectiveState::enemiesNear)
@@ -115,7 +116,12 @@ bool CanAttack(const War& war, int side, int index);
 /// i.e. 45 s for a squad of eight, 22.5 s for two squads, 15 s from three squads on.
 float CaptureSeconds(float strength, const Tuning& tuning);
 
-/// The side whose strength is at least dominanceRatio times every other side present, or NoSide
+/// What capturing runs on: `side`'s strength less the strongest other side present (8 against 3
+/// takes it at the speed of 5 alone).
+float CaptureMargin(const Presence& presence, int sideCount, int side);
+
+/// The side whose strength is more than dominanceRatio times every other side present (with the
+/// default 1, simply the side with more soldiers there), or NoSide
 /// (nobody present, or contested). `contested` reports two or more sides present without one dominating.
 int DominantSide(const Presence& presence, int sideCount, const Tuning& tuning, bool& contested);
 

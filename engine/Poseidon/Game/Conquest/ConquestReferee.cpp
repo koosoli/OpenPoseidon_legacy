@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <Poseidon/Game/Conquest/ConquestReferee.hpp>
 #include <Poseidon/Game/Conquest/ConquestView.hpp>
+#include <Poseidon/Game/Conquest/ConquestLlm.hpp>
 
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AICenter.hpp>
 #include <Poseidon/AI/AIGroup.hpp>
 #include <Poseidon/AI/AIUnit.hpp>
+#include <Poseidon/AI/VehicleAI.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Modules/Modules.hpp>
@@ -123,6 +125,9 @@ struct Config
     std::string barrageAmmo = "Shell120";
     std::array<std::string, MaxSides> captureVehicle; // the free troop transport a captured base gives
     std::array<std::string, MaxSides> arsenalClass;   // the owner's weapons and ammunition box at each post
+    // The weapons stocked into it, class and count: the game's ammunition boxes carry magazines only,
+    // and an arsenal is also where a soldier changes his weapon.
+    std::array<std::vector<std::pair<std::string, int>>, MaxSides> arsenalWeapons;
     float arsenalRestock = 600.0f;                    // seconds until a post's box is replaced by a full one
 };
 
@@ -198,6 +203,18 @@ struct Referee
     std::array<float, MaxSides> netCooldown{};
     std::array<bool, MaxSides> netHuman{};
     std::array<std::vector<Contact>, MaxSides> netContacts;
+    // the LLM commander (Hybrid) and the player's requests to HQ: steers for the Standard commander
+    std::array<std::vector<float>, MaxSides> llmPriority; // per objective
+    std::array<std::string, MaxSides> posture;           // "attack", "balanced", "defend"
+    std::array<std::string, MaxSides> llmBuy;            // the next purchase the LLM asked for
+    std::array<std::string, MaxSides> llmReason;
+    std::array<std::deque<std::string>, MaxSides> llmMemory; // the commander's own earlier decisions, oldest first
+    std::array<float, MaxSides> lastLlmAsk{-1.0e9f, -1.0e9f, -1.0e9f};
+    std::array<float, MaxSides> lastLlmFailure{-1.0e9f, -1.0e9f, -1.0e9f};
+    std::array<int, MaxSides> llmEpoch{};
+    int captureEpoch = 0; // grows with every change of hands: an answer about an older war is dropped
+    std::array<int, MaxSides> humanPriority{-1, -1, -1}; // the objective the player asked HQ to push
+    std::array<float, MaxSides> humanPriorityUntil{-1.0e9f, -1.0e9f, -1.0e9f};
     float mirrorSince = 0.0f;
     bool netTestSent = false;
     float lastTick = -1.0f;
@@ -242,6 +259,7 @@ struct Saved
     std::vector<float> postX, postY; // where each command post stands: the capture centre
     std::string explored;            // the shroud, one '0'/'1' per cell
     int shroudSize = 0;
+    std::array<std::deque<std::string>, MaxSides> llmMemory;
     std::array<float, MaxSides> lastBarrage{-1.0e9f, -1.0e9f, -1.0e9f};
     float lastTick = -1.0f;
     float lastStatus = -1.0e9f;
@@ -382,6 +400,9 @@ bool LoadConfig(Referee& r, const ParamEntry& cfg)
     r.config.defaults.commanderView = Number(cfg, "commanderView", 1.0f) != 0.0f;
     r.config.defaults.hqRadio = Number(cfg, "hqRadio", 1.0f) != 0.0f;
     r.config.defaults.fog = Text(cfg, "fog", "contacts") == "shroud" ? FogMode::Shroud : FogMode::Contacts;
+    for (int s = 0; s < r.war.sideCount; s++)
+        r.config.defaults.llmCommander[s] = Text(cfg, (std::string(SideLabel(r.config.engineSide[s])) + "commander").c_str(),
+                                                 "standard") == "llm";
     r.config.postClass = Text(cfg, "postClass", r.config.postClass.c_str());
     r.config.flagClass = Text(cfg, "flagClass", r.config.flagClass.c_str());
     r.config.barrageCost = Number(cfg, "barrageCost", r.config.barrageCost);
@@ -400,6 +421,24 @@ bool LoadConfig(Referee& r, const ParamEntry& cfg)
         r.config.captureVehicle[s] = Text(cfg, (label + "captureVehicle").c_str(), engine == TEast ? "Ural" : "Truck5tOpen");
         r.config.arsenalClass[s] = Text(cfg, (label + "arsenal").c_str(),
                                         engine == TWest ? "ReammoBoxWest" : engine == TEast ? "ReammoBoxEast" : "ReammoBoxGuer");
+        // <SIDE>arsenalWeapons[] = {"M16", 6, "M21", 2, ...}
+        r.config.arsenalWeapons[s].clear();
+        if (const ParamEntry* list = cfg.FindEntry((label + "arsenalWeapons").c_str()); list && list->IsArray())
+        {
+            for (int i = 0; i + 1 < list->GetSize(); i += 2)
+            {
+                const RStringB name = (*list)[i];
+                r.config.arsenalWeapons[s].emplace_back(static_cast<const char*>(name), static_cast<int>(static_cast<float>((*list)[i + 1])));
+            }
+        }
+        else if (engine == TWest)
+            r.config.arsenalWeapons[s] = {{"M16", 6}, {"M16GrenadeLauncher", 2}, {"M21", 2}, {"M60", 2},
+                                          {"LAWLauncher", 3}, {"CarlGustavLauncher", 1}, {"Binocular", 2}};
+        else if (engine == TEast)
+            r.config.arsenalWeapons[s] = {{"AK74", 6}, {"AK47", 2}, {"SVDDragunov", 2}, {"PK", 2},
+                                          {"RPGLauncher", 3}, {"Binocular", 2}};
+        else
+            r.config.arsenalWeapons[s] = {{"AK47CZ", 4}, {"AK47", 4}, {"Binocular", 2}};
     }
     r.tuning.baseCaptureSeconds = Number(cfg, "captureSeconds", r.tuning.baseCaptureSeconds);
     r.tuning.securityRadius = Number(cfg, "securityRadius", r.tuning.securityRadius);
@@ -537,6 +576,9 @@ bool LoadConfig(Referee& r, const ParamEntry& cfg)
     }
     r.posts.assign(r.war.defs.size(), Post());
     r.spawnWhy.assign(r.war.defs.size(), std::array<std::string, MaxSides>());
+    for (int s = 0; s < MaxSides; s++)
+        r.llmPriority[s].assign(r.war.defs.size(), 0.0f);
+    Llm::CancelAll(); // answers about the previous war are worthless
     r.markerText.assign(r.war.defs.size(), std::string());
     r.markerOwner.assign(r.war.defs.size(), -2);
     LOG_INFO(Mission, "Conquest: {} objectives, {} sides, cap {} per side", r.war.defs.size(), r.war.sideCount,
@@ -1127,6 +1169,10 @@ int ChooseSquadType(const Referee& r, int side, int base)
             }
         }
     }
+    if (const std::string& asked = r.llmBuy[side]; !asked.empty())
+        for (size_t t = 0; t < r.config.squads.size(); t++)
+            if (r.config.squads[t].name == asked && affordable(static_cast<int>(t)))
+                return static_cast<int>(t);
     std::vector<const char*> wanted;
     if (front > 2500.0f)
         wanted = {"air", "motorised", "mechanised"};
@@ -1144,8 +1190,25 @@ int ChooseSquadType(const Referee& r, int side, int base)
 
 void Plan(Referee& r, int side, float now)
 {
-    const SideView view = BuildView(r, side, now);
-    const std::vector<Intent> intents = PlanStandard(view, r.commander);
+    SideView view = BuildView(r, side, now);
+    // Steers from above: the LLM commander's priorities and the player's request to HQ.
+    view.priority = r.llmPriority[side];
+    view.priority.resize(r.war.defs.size(), 0.0f);
+    if (r.humanPriority[side] >= 0 && now < r.humanPriorityUntil[side])
+        view.priority[r.humanPriority[side]] = 3.0f;
+    // The posture tunes how much force an attack needs and how much stays at home.
+    CommanderTuning tuning = r.commander;
+    if (r.posture[side] == "attack")
+    {
+        tuning.forceRatio = 1.2f;
+        tuning.garrisonMen = 6.0f;
+    }
+    else if (r.posture[side] == "defend")
+    {
+        tuning.forceRatio = 2.0f;
+        tuning.garrisonMen = 12.0f;
+    }
+    const std::vector<Intent> intents = PlanStandard(view, tuning);
     std::map<std::pair<int, int>, std::vector<int>> radioed; // (task, objective) -> squads newly given it
     for (const Intent& intent : intents)
     {
@@ -1164,8 +1227,12 @@ void Plan(Referee& r, int side, float now)
             if (type < 0)
                 continue;
             if (SpawnSquad(r, side, intent.objective, false, type))
+            {
                 WarLog(Name(side) + " bought a " + r.config.squads[type].name + " at " +
                        r.war.defs[intent.objective].name + " (" + intent.why + ")");
+                if (r.llmBuy[side] == r.config.squads[type].name)
+                    r.llmBuy[side].clear(); // the LLM's purchase is made
+            }
             continue;
         }
         for (GroupRecord& rec : r.groups)
@@ -1507,6 +1574,15 @@ void UpdateArsenals(Referee& r, float now)
             continue;
         const ObjectiveDef& d = r.war.defs[o];
         post.arsenal = CreateVehicleAt(RString(r.config.arsenalClass[owner].c_str()), d.x - 6.0f, d.y + 5.0f);
+        if (EntityAI* stocked = post.arsenal)
+            for (const auto& [weapon, count] : r.config.arsenalWeapons[owner])
+            {
+                GameValue cargo = GWorld->GetGameState()->CreateGameValue(GameArray);
+                GameArrayType& c = cargo;
+                c.Add(GameValue(RString(weapon.c_str())));
+                c.Add(GameValue(static_cast<float>(count)));
+                RunWith("_o addWeaponCargo _p", GameValueExt(stocked), cargo);
+            }
     }
 }
 
@@ -1542,6 +1618,177 @@ void FireShells(Referee& r, float now)
 }
 
 #include "ConquestRefereeNet.inc"
+
+// ---- the LLM commander (Hybrid) ----
+
+std::vector<std::string> ObjectiveNames(const Referee& r)
+{
+    std::vector<std::string> out;
+    for (const ObjectiveDef& d : r.war.defs)
+        out.push_back(d.name);
+    return out;
+}
+
+std::vector<std::string> SquadTypeNames(const Referee& r)
+{
+    std::vector<std::string> out;
+    for (const SquadDef& d : r.config.squads)
+        out.push_back(d.name);
+    return out;
+}
+
+// What `side` knows of the war, for a model: never ground truth (enemy strength comes from the side's
+// own target database through BuildView), and the log only where it is the side's business.
+std::string SideReport(Referee& r, int side, float now)
+{
+    const SideView view = BuildView(r, side, now);
+    std::string out;
+    char line[512];
+    int enemy = NoSide;
+    for (int s = 0; s < r.war.sideCount; s++)
+        if (s != side)
+            enemy = s;
+    std::snprintf(line, sizeof(line),
+                  "You command %s. War time %d min. Supplies %.0f (+%.0f a minute). Soldiers %d of %d allowed. "
+                  "War score: yours %.0f, the enemy's %.0f (a side at 0 loses).\n",
+                  Name(side).c_str(), static_cast<int>(now / 60.0f), r.war.pool[side], IncomePerMinute(r.war, side),
+                  r.live[side], r.config.cap, r.war.score[side], enemy == NoSide ? 0.0f : r.war.score[enemy]);
+    out += line;
+    out += "Objectives:\n";
+    for (size_t o = 0; o < r.war.defs.size(); o++)
+    {
+        const ObjectiveDef& d = r.war.defs[o];
+        const ObjectiveState& st = r.war.states[o];
+        const std::string owner = st.owner == side ? "yours" : st.owner == NoSide ? "neutral" : "the enemy's";
+        std::snprintf(line, sizeof(line), "- %s (%s, income %.0f): %s%s%s; enemy your side has seen near it: %.0f\n",
+                      d.name.c_str(), d.kind == ObjectiveKind::HQ ? "HQ" : "town", d.value, owner.c_str(),
+                      st.contested ? ", contested" : "",
+                      st.owner != side && CanAttack(r.war, side, static_cast<int>(o)) ? ", you may attack it" : "",
+                      o < view.knownEnemy.size() ? view.knownEnemy[o] : 0.0f);
+        out += line;
+    }
+    out += "Your squads:\n";
+    for (const GroupRecord& rec : r.groups)
+    {
+        AIGroup* grp = rec.group;
+        if (rec.side != side || !grp)
+            continue;
+        int men = 0;
+        for (int id = 1; id <= MAX_UNITS_PER_GROUP; id++)
+            if (Alive(grp->UnitWithID(id)))
+                men++;
+        const std::string type = rec.type >= 0 && rec.type < static_cast<int>(r.config.squads.size())
+                                     ? r.config.squads[rec.type].name
+                                     : std::string("player squad");
+        const std::string task = rec.task == TaskKind::None || rec.objective < 0
+                                     ? std::string("no task")
+                                     : std::string(TaskName(rec.task)) + " " + r.war.defs[rec.objective].name;
+        std::snprintf(line, sizeof(line), "- %s (%s, %d men): %s\n", Callsign(rec.id).c_str(), type.c_str(), men,
+                      task.c_str());
+        out += line;
+    }
+    out += "Squad types you can buy:";
+    for (const SquadDef& d : r.config.squads)
+    {
+        std::snprintf(line, sizeof(line), " %s (%.0f);", d.name.c_str(), d.cost);
+        out += line;
+    }
+    if (!r.llmMemory[side].empty())
+    {
+        // The commander's memory: what it decided before, so it can follow through or change course
+        // on purpose rather than start from nothing every few minutes.
+        out += "\nYour earlier decisions (oldest first):\n";
+        for (const std::string& m : r.llmMemory[side])
+            out += "- " + m + "\n";
+    }
+    out += "\nRecent events:\n";
+    const std::string mine = Name(side) + " ";
+    int shown = 0;
+    for (auto it = r.snapshot.log.rbegin(); it != r.snapshot.log.rend() && shown < 8; ++it)
+    {
+        const std::string& l = *it;
+        const bool hands = l.find(" captured ") != std::string::npos || l.find(" neutralised ") != std::string::npos;
+        if (hands || l.find(mine) != std::string::npos)
+        {
+            out += "- " + l + "\n";
+            shown++;
+        }
+    }
+    return out;
+}
+
+// Once in a while (and soon after a capture) ask the model; fold its answer in when it is still
+// about the war as it stands. Failures are logged and ignored: the Standard commander never stopped.
+void LlmStep(Referee& r, float now)
+{
+    for (int s = 0; s < r.war.sideCount; s++)
+    {
+        if (!r.options.llmCommander[s] || Human(r, s) || r.war.defeated[s])
+            continue;
+        Llm::Answer answer;
+        if (Llm::TakeAnswer(s, answer))
+        {
+            if (!answer.ok)
+            {
+                if (now - r.lastLlmFailure[s] > 300.0f)
+                    WarLog(Name(s) + " LLM commander: " + answer.error + "; the standard commander carries on");
+                r.lastLlmFailure[s] = now;
+            }
+            else if (r.llmEpoch[s] != r.captureEpoch)
+                WarLog(Name(s) + " LLM commander: the answer came after the front had changed; dropped");
+            else
+            {
+                std::fill(r.llmPriority[s].begin(), r.llmPriority[s].end(), 0.0f);
+                for (const auto& [name, weight] : answer.advice.priorities)
+                    for (size_t o = 0; o < r.war.defs.size(); o++)
+                        if (r.war.defs[o].name == name)
+                            r.llmPriority[s][o] = weight;
+                r.posture[s] = answer.advice.posture;
+                r.llmBuy[s] = answer.advice.buy;
+                r.llmReason[s] = answer.advice.reason;
+                {
+                    std::string top;
+                    float best = 0.0f;
+                    for (const auto& [name, weight] : answer.advice.priorities)
+                        if (weight > best)
+                        {
+                            best = weight;
+                            top = name;
+                        }
+                    char when[48];
+                    std::snprintf(when, sizeof(when), "minute %d: ", static_cast<int>(now / 60.0f));
+                    std::string m = when + answer.advice.posture + (top.empty() ? std::string() : ", main effort " + top);
+                    if (!answer.advice.buy.empty())
+                        m += ", buy " + answer.advice.buy;
+                    if (!answer.advice.reason.empty())
+                        m += " -- \"" + answer.advice.reason + "\"";
+                    r.llmMemory[s].push_back(m);
+                    while (r.llmMemory[s].size() > 8)
+                        r.llmMemory[s].pop_front();
+                }
+                r.replan[s] = true;
+                char took[32];
+                std::snprintf(took, sizeof(took), "%.0f s", answer.seconds);
+                WarLog(Name(s) + " LLM commander (" + took + ", " + answer.advice.posture + "): " +
+                       (answer.advice.reason.empty() ? std::string("new priorities") : answer.advice.reason));
+                if (!answer.advice.reason.empty())
+                    Radio(r, s, "Commander's intent: " + answer.advice.reason);
+            }
+        }
+        const bool due = now - r.lastLlmAsk[s] > 240.0f || (r.llmEpoch[s] != r.captureEpoch && now - r.lastLlmAsk[s] > 30.0f);
+        if (!due || Llm::InFlight(s) || now - r.lastLlmFailure[s] < 60.0f)
+            continue;
+        std::string why;
+        r.lastLlmAsk[s] = now;
+        r.llmEpoch[s] = r.captureEpoch;
+        if (!Llm::Ask(s, SideReport(r, s, now), ObjectiveNames(r), SquadTypeNames(r), &why))
+        {
+            if (now - r.lastLlmFailure[s] > 300.0f)
+                WarLog(Name(s) + " LLM commander not asked: " + why + "; the standard commander carries on");
+            r.lastLlmFailure[s] = now;
+        }
+    }
+}
 
 void Tick(Referee& r, float dt, float now)
 {
@@ -1601,6 +1848,7 @@ void Tick(Referee& r, float dt, float now)
             else if (before == s)
                 Radio(r, s, "All units, we have lost " + name + ".");
         }
+        r.captureEpoch++;
         if (result.event == CaptureEvent::Captured)
         {
             GiveCaptureVehicle(r, result.side, o);
@@ -1618,6 +1866,8 @@ void Tick(Referee& r, float dt, float now)
         Status(r);
     }
     TrackGroups(r, now);
+    if (!r.ended)
+        LlmStep(r, now);
     if (!r.ended)
         for (int s = 0; s < r.war.sideCount; s++)
             if (!r.war.defeated[s] && (r.replan[s] || now - r.lastPlan[s] >= r.config.planSeconds))
@@ -1765,6 +2015,14 @@ LSError SerializeSaved(ParamArchive& ar, Saved& w)
         PARAM_CHECK(sub.Serialize("losses", w.losses[s], 1, 0))
         PARAM_CHECK(sub.Serialize("bought", w.bought[s], 1, 0))
         PARAM_CHECK(sub.Serialize("lastBarrage", w.lastBarrage[s], 1, -1.0e9f))
+        bool llm = w.options.llmCommander[s];
+        PARAM_CHECK(sub.Serialize("llmCommander", llm, 1, false))
+        w.options.llmCommander[s] = llm;
+        int lines = static_cast<int>(w.llmMemory[s].size());
+        PARAM_CHECK(sub.Serialize("llmMemoryLines", lines, 1, 0))
+        w.llmMemory[s].resize(static_cast<size_t>(std::clamp(lines, 0, 8)));
+        for (size_t i = 0; i < w.llmMemory[s].size(); i++)
+            PARAM_CHECK(SerializeText(sub, Key("llmMemory", i).c_str(), w.llmMemory[s][i]))
         w.defeated[s] = defeated;
         ar.CloseSubclass(sub);
     }
@@ -1892,6 +2150,7 @@ void Restore(Referee& r, const Saved& w)
         r.shroudSize = 0;
     }
     r.lastBarrage = w.lastBarrage;
+    r.llmMemory = w.llmMemory;
     r.lastTick = w.lastTick;
     r.lastStatus = w.lastStatus;
     r.snapshot.log = w.log;
@@ -1954,6 +2213,7 @@ LSError Serialize(ParamArchive& ar)
         for (uint8_t c : r.explored)
             w.explored.push_back(c ? '1' : '0');
         w.lastBarrage = r.lastBarrage;
+        w.llmMemory = r.llmMemory;
         w.viewOpen = View::Active();
         w.lastTick = r.lastTick;
         w.lastStatus = r.lastStatus;
@@ -2727,6 +2987,100 @@ std::vector<Contact> KnownEnemies(int side)
     return out;
 }
 
+std::string ArsenalReport()
+{
+    // The same test the physical inventory's vicinity pane applies (InventoryModel::ScanVicinity): a
+    // VehicleSupply in the landscape's object lists, able to hold cargo or holding some.
+    Referee& r = R();
+    std::string out;
+    if (!r.active || !GLandscape)
+        return "no war";
+    for (size_t o = 0; o < r.war.defs.size(); o++)
+    {
+        EntityAI* box = r.posts[o].arsenal;
+        out += r.war.defs[o].name + ": ";
+        if (!box)
+        {
+            out += r.war.states[o].owner == NoSide ? "none (nobody owns it); " : "MISSING; ";
+            continue;
+        }
+        VehicleSupply* supply = dyn_cast<VehicleSupply>(box);
+        const EntityAIType* type = supply ? supply->GetType() : nullptr;
+        const bool cap = type && (type->GetMaxMagazinesCargo() > 0 || type->_maxWeaponsCargo > 0);
+        bool listed = false;
+        const int x = toIntFloor(box->Position().X() / LandGrid), z = toIntFloor(box->Position().Z() / LandGrid);
+        const ObjectList& list = GLandscape->GetObjects(z, x);
+        for (int i = 0; i < list.Size(); i++)
+            listed = listed || list[i] == box;
+        char line[200];
+        std::snprintf(line, sizeof(line), "%s supply=%d cargoCap=%d weapons=%d magazines=%d listed=%d; ",
+                      static_cast<const char*>(box->GetType()->GetName()), supply ? 1 : 0, cap ? 1 : 0,
+                      supply ? supply->GetWeaponCargoSize() : 0, supply ? supply->GetMagazineCargoSize() : 0,
+                      listed ? 1 : 0);
+        out += line;
+    }
+    return out;
+}
+
+std::string HqReport()
+{
+    Referee& r = R();
+    if (!r.active || !r.started || r.playerSide == NoSide || InMultiplayer())
+        return std::string();
+    const float now = Now();
+    const int side = r.playerSide;
+    std::string out = "=== CONQUEST: THE WAR AS YOUR SIDE KNOWS IT (HQ speaks from this) ===\n";
+    out += SideReport(r, side, now);
+    // The plan as it stands: what the commander will push first, and why.
+    SideView view = BuildView(r, side, now);
+    view.priority = r.llmPriority[side];
+    view.priority.resize(r.war.defs.size(), 0.0f);
+    if (r.humanPriority[side] >= 0 && now < r.humanPriorityUntil[side])
+        view.priority[r.humanPriority[side]] = 3.0f;
+    const auto ranked = RankTargets(view);
+    if (!ranked.empty())
+    {
+        out += "HQ's plan: the main effort is " + r.war.defs[ranked.front().first].name;
+        if (ranked.size() > 1)
+            out += ", then " + r.war.defs[ranked[1].first].name;
+        out += ".";
+        if (r.humanPriority[side] >= 0 && now < r.humanPriorityUntil[side])
+            out += " (The player asked for " + r.war.defs[r.humanPriority[side]].name + ".)";
+        if (!r.llmReason[side].empty())
+            out += " Commander's intent: " + r.llmReason[side];
+        out += "\n";
+    }
+    if (const PlayerOrder order = CurrentPlayerOrder(); order.valid)
+        out += "The player's own squad is ordered to: " + order.text + ".\n";
+    out += "When the player asks HQ to put the weight of the war on an objective, answer as HQ and add the order "
+           "{\"to\": \"all\", \"order\": \"priority\", \"value\": \"<objective name>\"}. HQ cannot push an objective "
+           "the side may not attack yet (only ones next to a held objective).\n";
+    return out;
+}
+
+std::string RequestPriority(const std::string& objective)
+{
+    Referee& r = R();
+    if (!r.active || !r.started || r.playerSide == NoSide)
+        return "HQ: there is no war to steer.";
+    const int side = r.playerSide;
+    int found = -1;
+    for (size_t o = 0; o < r.war.defs.size(); o++)
+        if (_stricmp(r.war.defs[o].name.c_str(), objective.c_str()) == 0)
+            found = static_cast<int>(o);
+    if (found < 0)
+        return "HQ: no objective called " + objective + ".";
+    const std::string& name = r.war.defs[found].name;
+    if (r.war.states[found].owner != side && !CanAttack(r.war, side, found))
+        return "HQ: negative, " + name + " is not on our front yet. Take a town next to it first.";
+    r.humanPriority[side] = found;
+    r.humanPriorityUntil[side] = Now() + 600.0f;
+    r.replan[side] = true;
+    WarLog(Name(side) + " HQ: the player asked for " + name + " as the main effort");
+    return r.war.states[found].owner == side ? "HQ: understood, " + name + " will be held. Reinforcing it."
+                                             : "HQ: understood, " + name + " is the main effort for the next ten minutes.";
+}
+
 void HandleNetRequest(const GameValue& value)
 {
     HandleRequest(R(), value);
@@ -2816,7 +3170,7 @@ static GameValue ConquestTakeControlUnary(const GameState*, GameValuePar oper1)
     return GameValue(RString(why.c_str()));
 }
 
-// conquestStart ["EAST", "soldier"|"commander", "contacts"|"shroud", "noview"]: the setup screen's Start, from a
+// conquestStart ["EAST", "soldier"|"commander", "contacts"|"shroud", "noview"|"", ["WEST"]]: the setup screen's Start, from a
 // script (the soak and test harnesses). Missing entries keep the mission's defaults.
 static GameValue ConquestStartUnary(const GameState*, GameValuePar oper1)
 {
@@ -2844,6 +3198,16 @@ static GameValue ConquestStartUnary(const GameState*, GameValuePar oper1)
         options.commanderView = false;
         options.startInCommand = false;
     }
+    // [..., ["EAST"]]: the sides whose commander asks an LLM (Hybrid).
+    if (a.Size() > 4 && a[4].GetType() == GameArray)
+    {
+        const GameArrayType& llm = a[4];
+        for (int i = 0; i < llm.Size(); i++)
+            if (llm[i].GetType() == GameString)
+                for (size_t s = 0; s < sides.size(); s++)
+                    if (_stricmp(sides[s].c_str(), static_cast<const char*>(static_cast<GameStringType>(llm[i]))) == 0)
+                        options.llmCommander[s] = true;
+    }
     return GameValue(Poseidon::Conquest::BeginWar(options));
 }
 
@@ -2857,6 +3221,12 @@ static GameValue ConquestBarrageUnary(const GameState*, GameValuePar oper1)
     if (Poseidon::Conquest::OrderBarrage(static_cast<float>(a[0]), static_cast<float>(a[1]), &why))
         return GameValue(true);
     return GameValue(RString(why.c_str()));
+}
+
+// conquestArsenals: each post's arsenal box as the inventory sees it (class, supply, cargo, listed).
+static GameValue ConquestArsenalsNular(const GameState*)
+{
+    return GameValue(RString(Poseidon::Conquest::ArsenalReport().c_str()));
 }
 
 // conquestLog: the war log's latest lines, newest last (a multiplayer client's is the server's, mirrored).
@@ -2898,6 +3268,7 @@ INIT_MODULE(ConquestReferee, 3)
     GGameState.NewFunction(GameFunction(GameNothing, "conquestRequest", ConquestRequestUnary, GameArray));
     GGameState.NewFunction(GameFunction(GameScalar, "conquestOrder", ConquestOrderUnary, GameArray));
     GGameState.NewNularOp(GameNular(GameString, "conquestLog", ConquestLogNular));
+    GGameState.NewNularOp(GameNular(GameString, "conquestArsenals", ConquestArsenalsNular));
     GGameState.NewFunction(GameFunction(GameBool, "conquestStart", ConquestStartUnary, GameArray));
     GGameState.NewFunction(GameFunction(GameAny, "conquestBarrage", ConquestBarrageUnary, GameArray));
     GGameState.NewFunction(GameFunction(GameAny, "conquestTakeControl", ConquestTakeControlUnary, GameScalar));

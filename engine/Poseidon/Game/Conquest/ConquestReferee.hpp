@@ -177,6 +177,7 @@ struct Options
     FogMode fog = FogMode::Contacts;
     bool possession = true;        // take control of any friendly soldier
     bool hqRadio = true;           // the AI commander radios its orders while the player does not command
+    std::array<bool, MaxSides> llmCommander{}; // the side's commander asks an LLM for its priorities (Hybrid)
 };
 
 /// The mission opened with CfgConquest setup = 1 and the player has not chosen yet.
@@ -216,5 +217,17 @@ PlayerOrder CurrentPlayerOrder();
 /// Multiplayer: a client's commander action ([player, kind, args]), run on the server through
 /// `remoteExec ["conquestRequest", 2]`.
 void HandleNetRequest(const GameValue& value);
+
+// ---- talking to HQ (NPC chat) ----
+
+/// The war as the player's side knows it, with HQ's plan, for NPC chat's situation report. Empty when
+/// no single-player war runs.
+std::string HqReport();
+/// The player asked HQ (by voice or text) to put the weight of the war on `objective`. HQ's answer,
+/// accepted or refused with the reason.
+std::string RequestPriority(const std::string& objective);
+
+/// Each post's arsenal box as the physical inventory sees it (the conquestArsenals check command).
+std::string ArsenalReport();
 
 } // namespace Poseidon::Conquest

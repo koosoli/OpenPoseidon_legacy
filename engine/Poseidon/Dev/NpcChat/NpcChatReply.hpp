@@ -45,6 +45,7 @@ enum class OrderKind
     GetIn,      // board vehicle (target "V1")
     GetOut,     // dismount
     LineUp,     // "line up", "stand in a line": a real line of soldiers, not the formation (where: optional centre)
+    Priority,   // Conquest: HQ puts the weight of the war on an objective (value: its name); no squad member moves
     Invalid
 };
 

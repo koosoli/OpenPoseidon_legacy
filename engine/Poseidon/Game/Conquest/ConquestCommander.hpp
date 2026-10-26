@@ -51,6 +51,9 @@ struct SideView
     int cap = 0;
     float squadCost = 80.0f;
     int squadSize = 8;
+    // Per objective, a steer from above: the LLM commander's priorities or the player's request to HQ
+    // (-2 leave it alone .. 3 the main effort). Empty or 0: the Standard commander's own judgement.
+    std::vector<float> priority;
 };
 
 struct Intent

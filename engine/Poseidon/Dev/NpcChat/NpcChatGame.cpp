@@ -2,6 +2,7 @@
 #include <Poseidon/Dev/NpcChat/NpcChatGame.hpp>
 
 #include <Poseidon/AI/AI.hpp>
+#include <Poseidon/Game/Conquest/ConquestReferee.hpp>
 #include <Poseidon/AI/AICenter.hpp>
 #include <Poseidon/AI/AIGroup.hpp>
 #include <Poseidon/AI/AIUnit.hpp>
@@ -406,6 +407,8 @@ ReportResult BuildSituationReport(const Settings& settings)
     char line[1536]; // a squad line carries the persona too
     r += "=== SITUATION REPORT (live game state) ===\n";
     r += "Mission: " + MissionName() + "\n";
+    // Conquest: the war as the player's side knows it, and HQ's plan, so HQ answers from the real state.
+    r += Conquest::HqReport();
 
     if (settings.includeEnvironment)
     {
@@ -879,10 +882,10 @@ bool SpeakerPosition(int registryId, const std::string& id, float& x, float& y, 
     return true;
 }
 
-std::vector<std::string> ExecuteOrders(int registryId, const std::vector<Order>& orders)
+std::vector<std::string> ExecuteOrders(int registryId, const std::vector<Order>& requested)
 {
     std::vector<std::string> log;
-    if (orders.empty())
+    if (requested.empty())
         return log;
     std::string why;
     if (!GameAvailable(&why))
@@ -890,6 +893,16 @@ std::vector<std::string> ExecuteOrders(int registryId, const std::vector<Order>&
         log.push_back("orders ignored: " + why);
         return log;
     }
+    // Conquest: a request to HQ to put the weight of the war somewhere. HQ answers whether or not the
+    // player leads a squad; the war's referee accepts or refuses it.
+    std::vector<Order> orders;
+    for (const Order& order : requested)
+        if (order.kind == OrderKind::Priority)
+            log.push_back(Conquest::RequestPriority(order.value));
+        else
+            orders.push_back(order);
+    if (orders.empty())
+        return log;
     Person* player = PlayerPerson();
     AIUnit* me = player->Brain();
     AIGroup* grp = me->GetGroup();

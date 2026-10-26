@@ -125,8 +125,11 @@ Every number below is a config value and a **first guess, to be tuned from Slice
 - The referee ticks at 1 Hz. A side's *strength* inside the radius: each living, non-captive man counts 1 (crew
   inside vehicles too), and a crewed armoured vehicle adds 2. Empty vehicles and aircraft more than 30 m above the
   ground count 0.
-- A side makes progress only while its strength is **at least twice that of every other side present**. Otherwise
-  the objective is *contested* and progress freezes. Why 2:1 and not "any enemy freezes it": under that rule, one
+- A side makes progress while it has **more soldiers in the zone than every other side present** (owner,
+  2026-10-26; the first version asked for twice as many). Only a tie is *contested* and freezes the bar, and the
+  speed follows the margin: 8 against 3 captures like 5 alone.
+  (Superseded reasoning of the first version:) Previously a side made progress only with at least twice the strength
+  of every other side present. Otherwise the objective was *contested* and progress froze. Why 2:1 and not "any enemy freezes it": under that rule, one
   AI soldier stuck in a house holds off a whole squad indefinitely, which is both an exploit and a classic AI
   stalemate.
 - Rate: a full bar takes `90 s / clamp(strength / 4, 0.5, 6)`: 180 s for two men, 45 s for an eight-man squad,
@@ -628,3 +631,40 @@ fill (a scripted spawn) rather than the war's own purchasing.
   a free troop transport at every captured base, and an **arsenal** (the owner's `ReammoBox*`) at every owned
   post, restocked every 10 minutes; the inventory's vicinity pane takes gear from it (in multiplayer the classic
   Gear screen, as the physical inventory is single-player only).
+
+## Status, 2026-10-26 (evening): Slice 4 -- the LLM commander, HQ conversation, AI & voice settings
+
+- **AI & voice panel** (the setup screen's and the commander view's "AI & voice..."): talking to HQ and the squad on
+  or off; the language model (provider, model, address for Ollama/Custom, key, a Check button with the connection
+  state); voice input (speech to text: provider, key, check; hold Caps Lock to speak); voice output (text to speech:
+  provider, key, volume, radio voice, Test voice, check); "remember keys" (DPAPI-encrypted, outside the profile). It
+  reads and writes NPC chat's own `npcChat.json` and key store, so it and the dev panel's tab are two views of one
+  configuration, and it works without `--dev`.
+- **LLM commander, Hybrid** (`Game/Conquest/ConquestLlm.*`), per side, chosen on the setup screen (or
+  `<SIDE>commander = "llm"`). Every 4 game minutes, and 30 s after any change of hands, the side's report goes to
+  the model: objectives with owner and the enemy the SIDE has seen nearby (its target database, never ground
+  truth), its squads and tasks, supplies, prices, its own recent log lines. The model answers with priorities
+  (-2..3 per objective), a posture (attack / balanced / defend) and maybe a purchase. The Standard commander folds
+  the priorities into its target ranking, the posture into its force ratio and garrison size, and makes the
+  purchase when it can; it keeps every assignment. A request runs on a background thread, one per side; an answer
+  that comes after the front has changed is dropped; a failure (no key, transport error, prose, invalid JSON,
+  invented towns) is logged and the Standard commander carries on.
+- **Memory:** the commander's last 8 decisions (game minute, posture, main effort, purchase, reason) go into every
+  later report as "Your earlier decisions", and are saved with the game.
+- **HQ conversation:** NPC chat's situation report carries the war as the player's side knows it and HQ's plan
+  (main effort, the commander's intent, the player's squad order), so HQ answers from the real state. "HQ, put
+  everything on Figari" makes the model add a `priority` order; Conquest accepts it as the main effort for ten
+  minutes, or refuses an objective that is not on the front yet, and HQ says which.
+- **Checked:** `PoseidonTests "[conquest]"` (19 cases, 5 new: the answer parser and the priority order);
+  `scripts/Test-ConquestLlm.ps1` against a local stand-in model (`scripts/conquest_mock_llm.py`, no key, no cost):
+  the plan is applied (main effort, posture, purchase), the second request carries the memory, EAST's report holds
+  none of WEST's orders, the player's request to HQ becomes the main effort; a prose answer and an unreachable
+  server both leave the Standard commander running. Not checked against a real provider (the owner's keys and
+  quota). Talking to HQ is single player, as NPC chat is; in multiplayer the LLM commander runs on the server.
+- **Capture by majority** (owner, 2026-10-26): the side with more soldiers in a capture zone captures it; only a tie
+  freezes the bar; the speed follows the margin (`CaptureMargin`: 8 against 3 is as fast as 5 alone).
+- **Arsenal boxes, checked:** `conquestArsenals` applies the physical inventory's own test (a `VehicleSupply` in
+  the landscape's object lists with cargo). The stock `ReammoBox*` crates carry magazines only (61), so a box is
+  now also stocked with its side's weapons (`<SIDE>arsenalWeapons[]`; defaults: BLUFOR M16, M16 grenade launcher,
+  M21, M60, LAW, Carl Gustav, binoculars; OPFOR AK-74, AK-47, SVD, PK, RPG, binoculars). Not opened by hand in
+  the inventory screen yet.

@@ -71,6 +71,8 @@ std::vector<std::pair<int, float>> RankTargets(const SideView& view)
             score += 20.0f * s.level; // finish what was started
         if (s.owner == NoSide)
             score += 5.0f; // a neutral objective needs no draining
+        if (i < static_cast<int>(view.priority.size()))
+            score += 12.0f * view.priority[i]; // a weight of 3 outranks any ordinary difference
         out.emplace_back(i, score);
     }
     std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) { return a.second > b.second; });

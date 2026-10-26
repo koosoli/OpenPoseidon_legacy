@@ -588,6 +588,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Game/test_tri_generic_asserts.cpp
     Game/test_tri_value_getters.cpp
     Game/Conquest/test_conquest_rules.cpp
+    Game/Conquest/test_conquest_llm.cpp
     Dev/Debug/test_dev_mode_gates.cpp
     Dev/Debug/test_dev_panel_search.cpp
 
