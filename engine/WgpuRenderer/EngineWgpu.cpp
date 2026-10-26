@@ -2678,6 +2678,18 @@ AbstractTextBank* EngineWgpu::TextBank()
     return _wbank;
 }
 
+
+// OVERCAST-GLOOM: the Sky tab's value, or POSEIDON_OVERCAST_GLOOM=<0..1> for capture runs (--no-dev
+// cannot reach the slider). Clamped to 0..1.
+static float EffectiveOvercastGloom(float authored)
+{
+    static const float env = [] {
+        const char* v = std::getenv("POSEIDON_OVERCAST_GLOOM");
+        return v != nullptr ? static_cast<float>(std::atof(v)) : -1.0f;
+    }();
+    return std::clamp(env >= 0.0f ? env : authored, 0.0f, 1.0f);
+}
+
 void EngineWgpu::ResetForRemount()
 {
     // Terrain first: it holds raw TextureWgpu pointers (terrain pages, Tidewater bakes) that
@@ -3643,6 +3655,7 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
         wgr_set_cirrus_look(_renderer, s.cirrusAmount, s.cirrusMatchDeck);
         wgr_set_cirrus_softness(_renderer, s.cirrusSoftness);
         wgr_set_cloud_base_shade(_renderer, s.cloudBaseShade);
+        wgr_set_overcast_gloom(_renderer, EffectiveOvercastGloom(s.overcastGloom));
         wgr_set_fog_far_close(_renderer, s.fogFarClose);
         wgr_set_god_rays(_renderer, s.godRays ? 1u : 0u, s.godRayIntensity, s.godRayDensity,
                          s.godRayDistance, s.godRayG, s.godRayCloudInfluence,
@@ -22398,7 +22411,14 @@ void EngineWgpu::PushRenderParams()
         // the first frame in tau mode, where there is no measured dt yet.
         _autoExposureRate > 0.0f ? _autoExposureRate : _exposure.rate,
         _exposure.skyWeight,
-        nativeExposure ? nativeExposureCompensation : 1.0f,
+        // OVERCAST-GLOOM: under a thick deck the iris cancels only part of the darkening, so a closing
+        // overcast reads gloomier instead of being metered back to the same brightness (1 = all)
+        nativeExposure ? nativeExposureCompensation
+                       : 1.0f - 0.4f * EffectiveOvercastGloom(_sky.overcastGloom) * [] {
+                             const float t = std::clamp(((GLandscape ? GLandscape->GetOvercast() : 0.0f) - 0.6f) / 0.4f,
+                                                        0.0f, 1.0f);
+                             return t * t * (3.0f - 2.0f * t);
+                         }(),
         // stock worlds: -(tonemap exposure), which the meter's highlight cap needs to know where
         // a pixel lands on the curve (exposure.wgsl fs_lum_first); native: Reforger's mask
         nativeExposure ? 1.0f : -std::max(p.tonemap.exposure, 1e-3f),

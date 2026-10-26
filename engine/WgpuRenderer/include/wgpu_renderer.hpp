@@ -3439,6 +3439,10 @@ WGR_API void wgr_set_render_params(WgrRenderer* renderer, const WgrRenderParams*
        0 = off). A closed overcast deck is not affected. */
     WGR_API void wgr_set_cloud_base_shade(WgrRenderer* renderer, float strength);
 
+    /* OVERCAST-GLOOM: 0..1, how much a closing deck darkens (the deck's own transmission; the engine
+       lowers the auto-exposure compensation with the same value). 0 = off. */
+    WGR_API void wgr_set_overcast_gloom(WgrRenderer* renderer, float gloom);
+
     /* Fraction of the draw distance at which distance fog reaches FULL (0.3 .. 1.0).
 
        1.0 is the behaviour from before this existed: the aerial-perspective ramp is pinned to

@@ -91,7 +91,7 @@ struct Sky {
     ecef_x: vec4<f32>,
     ecef_z: vec4<f32>,
     // (OP, RAIN-DECK) x: the weather's rain density 0..1, eased (renderer-written); y: CLOUD-SHADE
-    // dark-base strength 0..1 (Sky tab "Dark bases"); zw unused
+    // dark-base strength 0..1 (Sky tab "Dark bases"); z: OVERCAST-GLOOM 0..1 (Sky tab); w: CIRRUS-PATCHES on (WGR_CIRRUS_PATCHES=1)
     weather: vec4<f32>,
 };
 
@@ -1867,7 +1867,14 @@ fn march_clouds(
     // clouds darker"): nimbostratus is deep and water-laden, and its base reads slate grey where a dry
     // overcast of the same coverage stays light. Heavy rain takes the deck's light to 22% (40% was
     // not dark enough, owner); a dry overcast is untouched.
-    res.inscatter = col * (1.0 - 0.78 * clamp(sky.weather.x, 0.0, 1.0));
+    // (OP, DECK-THICK) a closing deck is a thickening one, and a thick deck lets less light through.
+    // Without this the fill terms that ramp up with coverage (the deck term from 0.7, the phase going
+    // isotropic, the bases' AO floor rising) made the sky BRIGHTER from 70% to 100% overcast: the
+    // owner's Zeus slider "at one point the more overcast I do it becomes brighter again" (measured:
+    // horizon 142 at 70%, 188 at 90%). Falls to 45% of the light at full overcast, monotonically,
+    // scaled by OVERCAST-GLOOM (weather.z; off until the owner has seen it).
+    let deck_thick = 1.0 - 0.55 * clamp(sky.weather.z, 0.0, 1.0) * smoothstep(0.6, 1.0, cov);
+    res.inscatter = col * deck_thick * (1.0 - 0.78 * clamp(sky.weather.x, 0.0, 1.0));
     // The early-out above LEFT transmittance at the cut instead of driving it to zero, so a deck
     // that is opaque to the eye still passed ~1% of whatever was behind it. That is harmless for a
     // background of ordinary radiance and catastrophic for the sun disc, whose radiance is the solar
@@ -2177,13 +2184,14 @@ fn cirrus_rot(p: vec2<f32>, c: f32, s: f32) -> vec2<f32> {
 // over ~64 km and the marched column spans at most thick/CIRRUS_PATH_SIN_MIN horizontally (3-9 km
 // depending on puffiness), so reusing it across the shell is a slow shear, not a seam, and it
 // saves five taps per pixel.
-fn cirrus_warp(world_xz: vec2<f32>, scale: f32) -> vec2<f32> {
+fn cirrus_warp(world_xz: vec2<f32>, scale: f32) -> vec3<f32> {
     let q = cirrus_rot(world_xz * scale * 0.11, 0.87630, 0.48178);
     let n = textureSampleLevel(cloud_noise, cloud_samp,
-        vec3<f32>(q.x, 0.17 + sky.cloud4.z * scale * 0.5, q.y), 0.0).rg;
+        vec3<f32>(q.x, 0.17 + sky.cloud4.z * scale * 0.5, q.y), 0.0).rgb;
     // Warp displacement scales with the feature size, so MATCH (which shrinks features toward the
-    // deck's) does not leave a 6 km warp bending a 2 km cloud into a smear.
-    return (n - vec2<f32>(0.5, 0.5)) * CIRRUS_WARP * (CIRRUS_SCALE / scale);
+    // deck's) does not leave a 6 km warp bending a 2 km cloud into a smear. z: the same tap's third
+    // channel, the PATCH field cirrus_field clusters a sparse layer by (free: no extra fetch).
+    return vec3<f32>((n.xy - vec2<f32>(0.5, 0.5)) * CIRRUS_WARP * (CIRRUS_SCALE / scale), n.z);
 }
 
 // Cirrus density fraction [0,1] at a world XZ, at normalised height `h` through the shell.
@@ -2205,10 +2213,10 @@ fn cirrus_warp(world_xz: vec2<f32>, scale: f32) -> vec2<f32> {
 //   4. slice drift on the volume's third axis, proportional to world position. Two points a whole
 //      tile apart in X/Z now read DIFFERENT slices, so the repeat would have to align in three
 //      axes at once. Free: it is an add on a coordinate the tap already carries.
-fn cirrus_field(world_xz: vec2<f32>, h: f32, cover: f32, warp: vec2<f32>, sh: CirrusShape) -> f32 {
+fn cirrus_field(world_xz: vec2<f32>, h: f32, cover: f32, warp: vec3<f32>, sh: CirrusShape) -> f32 {
     let s = sh.scale;
     let drift = sky.cloud4.z * s;
-    let p = world_xz + warp;
+    let p = world_xz + warp.xy;
     // Slice drift (4). The two weights are irrational multiples of each other so the x and z
     // contributions do not come back into phase either. `h` walks the same axis, which is what
     // gives the marched shell genuine vertical structure.
@@ -2234,7 +2242,14 @@ fn cirrus_field(world_xz: vec2<f32>, h: f32, cover: f32, warp: vec2<f32>, sh: Ci
     let wa = 1.0 - wb;
     let mixed = a * wa + b * wb;
     let sheet = clamp(0.5 + (mixed - 0.5) * inverseSqrt(wa * wa + wb * wb), 0.0, 1.0);
-    var d0 = clamp((sheet - (1.0 - cover)) / max(cover, 1e-3), 0.0, 1.0);
+    // (2026-10-26) PATCHES. A sparse layer (the owner's coverage 0.20) broke into small cells of one
+    // size spread evenly over the whole sky, which read as a regular grid of puffs, rows toward the
+    // horizon. Real cirrocumulus comes in fields: the coverage is gathered into patches ~10 km
+    // across with clear sky between them, by the warp tap's third channel, strongest when sparse
+    // and gone by a closing layer (the mean coverage stays about where it was).
+    let patchy = (1.0 - smoothstep(0.35, 0.75, cover)) * clamp(sky.weather.w, 0.0, 1.0);
+    let cov_l = clamp(mix(cover, cover * mix(0.15, 1.85, smoothstep(0.3, 0.7, warp.z)), patchy), 0.0, 1.0);
+    var d0 = clamp((sheet - (1.0 - cov_l)) / max(cov_l, 1e-3), 0.0, 1.0);
     if (d0 <= 0.0) {
         return 0.0; // in a gap -> skip the fibre tap (the empty-space fast path, as the deck does)
     }
