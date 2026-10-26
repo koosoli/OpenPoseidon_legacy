@@ -92,8 +92,12 @@ fn glintFacet(xz: vec2<f32>, cell: f32, lvl: u32, need: vec2<f32>, sig: f32, fp:
     // smooth lobe's mean wherever the lobe is.
     let e2 = sig * sig + tau * tau;
     let ew = tau * tau / e2 * exp(-dot(need, need) / (2.0 * e2));
-    let ec = 3.14159265 * (r + 0.25 * fp) * (r + 0.25 * fp) / (cell * cell);
-    return min(w * cover / max(ew * min(ec, 1.0), 1e-4), 30.0);
+    // the disc's expected cover of a pixel is its area share pi r^2 / cell^2 whatever the footprint
+    // (spreading the disc over the pixel moves its area, it does not add any): a Monte Carlo of `cover`
+    // gives 0.50-0.52 for footprints up to 0.75 cell. The earlier pi (r + fp/4)^2 grew with the
+    // footprint and left the far glitter path up to half too dark.
+    let ec = 3.14159265 * r * r / (cell * cell);
+    return min(w * cover / max(ew * ec, 1e-4), 30.0);
 }
 
 override linear: f32 = 1.0;
