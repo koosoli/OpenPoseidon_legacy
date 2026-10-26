@@ -249,3 +249,81 @@ against the current water, sky or rain cost.
   in the post chain and its ordering against DLSS matters.
 
 Each port keeps the MIT copyright line of its source in the file header, as our Tidewater port does.
+
+## Status, 2026-10-26
+
+Every item was built behind its own switch, and each stays off by default until the owner signs it off. Each one was
+A/B-captured in the game:
+
+- under the game lock;
+- windowed at 1280x720;
+- from a separate bin folder, never from the game folder.
+
+**How cost was measured.** Each figure is the median of the engine's own GPU timer rows, from alternating runs, two
+rounds unless a note says otherwise. Water items use the water draw timer ("Water GPU ms draw="). Cloud items use the
+cloud march timer ("Cloud GPU ms march=").
+
+The picture pairs for sign-off are in `build/signoff/` of the audit worktree.
+
+### Water and sky
+
+| Item | Status | Switch / branch | Cost (off → on) | Notes |
+|---|---|---|---|---|
+| **#1 Rain on the ocean** | **Deployed**, on whenever it rains | `WGR_SEA_RAIN=0` turns it off. Deployed as `c66752aa0` | Equal within noise in rain. Clean round: near 0.72 / 0.69, mid 1.39 / 1.38, far 1.14 / 1.15 ms. Dry weather runs the unchanged shader. | The rain variant is a second pipeline, used only while it rains. One ring layer, drawn only where the capillary ripples it replaces were drawn (footprint < 0.04 m). |
+| **#2a Cloud multiple scattering** | **Deployed**, on | `WGR_CLOUD_MS=0` turns it off. `0461d8dcb`, deployed `4d5350ba5` | Equal within noise. Sun 1.21-1.25 / 1.22-1.24, away 0.74-0.76 / 0.76-0.79, across 1.13-1.15 / 1.16 ms. | Signed off by the owner. |
+| **#2b Two-stream overcast term** | Built, **meets the bar**, awaiting sign-off | `WGR_CLOUD_DECK=1`, branch `claude/look-pack` | Cloud march 0.87 / 0.88 and 0.87 / 0.86 ms. | A flat overcast deck gains billows, lighter undersides and depth. The per-ray part sits outside the sample loop (the first version cost +0.02-0.04 ms). |
+| **#3 Sun glints** | Built (v3), **meets the bar**, awaiting sign-off | `WGR_SEA_GLINTS=1`, branch `claude/look-pack` @ `a3983020f` | DLSS 0.653 / 0.670, 0.671 / 0.683 ms. Native 1.881 / 1.912, 1.883 / 1.901 ms. | See [Sun glints](#sun-glints) below. |
+| **LEAN slope moments** | **Full LEAN does not qualify.** Its cost-free core is built and meets the bar. | `WGR_SEA_SPECAA=1`, branch `claude/look-pack` | Specular AA: 0.70-0.71 / 0.71 ms. | Full LEAN needs a slope-moment texture per cascade (2 MB), its mips, and 4 more fetches per water pixel. There is no work of equal cost to remove. Kaplanyan normal-variance AA, capped at the sea's whole slope variance, is ALU only. The effect is subtle: the glitter path is slightly softer and less crawly. |
+| **Two-stage whitecaps** | Built, **not recommended** | `WGR_TW_FOAM2=1`, branch `claude/look-pack` | 0.78-0.79 / 0.80-0.81 ms (+0.02 ms in every round). | See [Two-stage whitecaps](#two-stage-whitecaps) below. |
+| **Cloud checkerboard accumulation** | **Already in the game** | PERF-CLOUD-TEMPORAL; `WGR_CLOUD_TEMPORAL=0` turns it off | n/a | Each 2x2 block re-marches one pixel per frame and reuses the other three. open-water's only extra is reprojection with the wind drift, which is negligible at a 3-frame age. |
+| **minamo lens film and drops** | **Dropped** on the owner's call | Removed from `claude/look-pack` | n/a | Built and captured, then removed. |
+
+#### Sun glints
+
+Three versions:
+
+1. **v1: Poisson glints re-rolled per screen pixel.** DLSS averaged them away. They cost +0.05 ms under DLSS and
+   +0.14-0.18 ms native.
+2. **v2/v3: one capillary facet per cell, anchored to the moving water (`lagXZ`).**
+   - The facet's tilt drifts three times per second.
+   - It glints where that tilt mirrors the sun into the eye.
+   - Its brightness is spread over the share of the pixel it covers.
+   - Two LOD octaves are blended.
+3. **v3 fixes.**
+   - Integer hashes: the cost fell from +0.05 to +0.01 ms under DLSS.
+   - Normalised by the facet's true expected cover, πr²/cell². A Monte Carlo found the earlier footprint-growing
+     term left the far path up to half too dark.
+
+Over a 6-shot motion burst under DLSS the glints stay coherent: they ride the waves and do not re-roll.
+
+A Monte Carlo of the model as coded keeps the lobe's mean within ±5% from its centre out to 2σ. On screen the glints
+read a few per cent darker, because the tone curve compresses the bright points, as a photograph of real glitter does.
+
+#### Two-stage whitecaps
+
+**What it does.** Fresh caps get solid cores from a ~0.4 s "breaking now" field, and old foam goes to the lace.
+
+**Why it is not recommended.**
+
+- **Cost:** the extra +0.02 ms is 8 buffer reads where caps resolve.
+- **Look:** in the final captures it shows far fewer caps near the eye than today's. Today's caps read better.
+
+Halving the reads would mean keeping one cascade, which drops either the big fresh caps or the small ones.
+
+### Fire, the follow-up to this audit (`claude/fire-multigrid`)
+
+Every fire item is off by default.
+
+| Item | Switch | Result |
+|---|---|---|
+| **Multigrid pressure** (fixed) | `WGR_FIRE_MG=1` or `2` | The coarse levels now keep the open boundary where the fine grid has it. A plain zero ghost cell had put it 2-8 cells further out, and the cycles diverged; that is what blew the wreck fire apart in the first A/B. Relative residual on the GPU: 24 Jacobi 0.74, one V-cycle 0.47, two 0.09. The flames stay tall, a little more upright and compact than today's. |
+| **Fire light volume** (Fire Pro `lighting.wgsl`) | `WGR_FIRE_LIGHT=1` | Each step builds a half-resolution light volume per box. The march reads its smoke shadows in one fetch instead of up to 10 taps per sample. The flames light their own smoke at night. By day, sunlit smoke keeps its shading, slightly smoother. |
+| **Cubic flame reconstruction** (Fire Pro `volume-reconstruction.wgsl`) | `WGR_FIRE_SMOOTH=1` | Less grain. Some streaks remain; they come from the march's step pattern. |
+
+**Fire cost is not signed off.** It was read from whole-frame GPU time, which is too noisy for the equal-cost bar:
+
+- light volume by day: 7.7 → 6.8 ms, one round;
+- light volume at night: 10.1 → 10.1 ms;
+- smooth flames and multigrid: within the noise.
+
+A dedicated fire GPU timer region would settle it. It is a small C++ logging change.
