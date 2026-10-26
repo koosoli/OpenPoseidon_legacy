@@ -294,10 +294,13 @@ foreach ($pack in @(
     }
     $contentPayload += @{Source=$metadata; Relative=($pack.Folder + '/mod.json')}
     $contentPayload += @{Source=$archive; Relative=($pack.Folder + '/AddOns/' + $pack.Archive)}
-    $missions = Join-Path $sourcePack 'Missions'
-    if (Test-Path -LiteralPath $missions) {
-        foreach ($file in Get-ChildItem -LiteralPath $missions -Recurse -File) {
-            $contentPayload += @{Source=$file.FullName; Relative=($pack.Folder + '/Missions/' + $file.FullName.Substring($missions.Length+1))}
+    # Single-player missions and, for packs that ship them (Conquest), multiplayer missions.
+    foreach ($missionFolder in @('Missions', 'MPMissions')) {
+        $missions = Join-Path $sourcePack $missionFolder
+        if (Test-Path -LiteralPath $missions) {
+            foreach ($file in Get-ChildItem -LiteralPath $missions -Recurse -File) {
+                $contentPayload += @{Source=$file.FullName; Relative=($pack.Folder + '/' + $missionFolder + '/' + $file.FullName.Substring($missions.Length+1))}
+            }
         }
     }
 }
@@ -364,7 +367,7 @@ foreach ($old in $relocatedPacks) {
     foreach ($file in Get-ChildItem -LiteralPath $oldDir -Recurse -File) {
         $rel = $file.FullName.Substring($oldDir.Length + 1)
         $managed = ($rel -eq 'mod.json') -or ($rel -like 'AddOns\*.pbo') -or
-                   (($rel -like 'Missions\*') -and (Test-Path -LiteralPath (Join-Path $newDir $rel)))
+                   ((($rel -like 'Missions\*') -or ($rel -like 'MPMissions\*')) -and (Test-Path -LiteralPath (Join-Path $newDir $rel)))
         if ($managed) { Remove-Item -LiteralPath $file.FullName -Force }
     }
     Get-ChildItem -LiteralPath $oldDir -Recurse -Directory | Sort-Object { $_.FullName.Length } -Descending |
