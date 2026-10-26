@@ -2248,7 +2248,7 @@ fn cirrus_field(world_xz: vec2<f32>, h: f32, cover: f32, warp: vec3<f32>, sh: Ci
     // across with clear sky between them, by the warp tap's third channel, strongest when sparse
     // and gone by a closing layer (the mean coverage stays about where it was).
     let patchy = (1.0 - smoothstep(0.35, 0.75, cover)) * clamp(sky.weather.w, 0.0, 1.0);
-    let cov_l = clamp(mix(cover, cover * mix(0.15, 1.85, smoothstep(0.3, 0.7, warp.z)), patchy), 0.0, 1.0);
+    let cov_l = clamp(mix(cover, cover * mix(0.35, 1.65, smoothstep(0.3, 0.7, warp.z)), patchy), 0.0, 1.0);
     var d0 = clamp((sheet - (1.0 - cov_l)) / max(cov_l, 1e-3), 0.0, 1.0);
     if (d0 <= 0.0) {
         return 0.0; // in a gap -> skip the fibre tap (the empty-space fast path, as the deck does)

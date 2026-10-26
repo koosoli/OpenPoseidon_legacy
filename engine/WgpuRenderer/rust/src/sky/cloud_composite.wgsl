@@ -13,6 +13,20 @@
 // fixed ray-march jitter. Separate module (not sky.wgsl) so it keeps its own
 // group(0) binding namespace.
 
+// (OP, FOG-DITHER; WGR_FOG_DITHER=1, off until the owner has seen it) the layered fog volume has 32
+// depth slices, and where its density turns sharply (the layer's top) the linear blend between
+// slices kinks at each one: seen from cloud height every slice is a horizontal band across the fog
+// and the clouds behind it (owner's screenshot). Half a slice of per-pixel jitter on the lookup turns
+// the bands into grain the temporal resolve averages away. One hash.
+fn fog_slice_dither(uv: vec2<f32>) -> f32 {
+#ifdef FOG_DITHER
+    let h = fract(sin(dot(floor(uv * vec2<f32>(4096.0, 2304.0)), vec2<f32>(12.9898, 78.233))) * 43758.5453);
+    return (h - 0.5) / 32.0;
+#else
+    return 0.0;
+#endif
+}
+
 @group(0) @binding(0) var cloud_lo: texture_2d<f32>;
 @group(0) @binding(1) var cloud_samp: sampler;
 // Full-res resolved prepass depth (reversed-Z: 0 = far/sky). Same view fs_cloud bounded its march to.
@@ -123,6 +137,6 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // already contains their L/T; transport cloud radiance through them once.
     let fraction = fog_depth_fraction(layer_packet,in.uv,d_ref);
     let local = textureSampleLevel(layer_fog,cloud_samp,
-        vec3<f32>(in.uv,sqrt(fraction)),0.0);
+        vec3<f32>(in.uv,clamp(sqrt(fraction) + fog_slice_dither(in.uv),0.0,1.0)),0.0);
     return vec4<f32>(c.rgb * local.a + local.rgb * (1.0-c.a),c.a);
 }

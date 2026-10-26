@@ -697,9 +697,22 @@ fn apply_fog_receiver(rgb_in: vec3<f32>, world_pos_rel: vec3<f32>, receiver: boo
     let surface_open = fog_surface_open(weather_map_coverage(absolute), receiver);
     let ray_far=fog_ray_far(layer_fog_packet.control.y,frame.cam_pos.y,world_pos_rel.y/max(dist,0.00001),layer_fog_packet.camera.w,layer_fog_packet.control.w);
     let local = textureSampleLevel(layer_fog_tex, froxel_samp,
-        vec3<f32>(uv, sqrt(clamp(dist / ray_far, 0.0, 1.0))), 0.0);
+        vec3<f32>(uv, clamp(sqrt(clamp(dist / ray_far, 0.0, 1.0)) + fog_slice_dither(uv), 0.0, 1.0)), 0.0);
     let distant = textureSampleLevel(layer_fog_tex, froxel_samp, vec3<f32>(uv, 1.0), 0.0);
     return fog_legacy_closure(rgb, inscat, amount, local, distant, surface_open);
+}
+// (OP, FOG-DITHER; WGR_FOG_DITHER=1, off until the owner has seen it) the layered fog volume has 32
+// depth slices, and where its density turns sharply (the layer's top) the linear blend between
+// slices kinks at each one: seen from cloud height every slice is a horizontal band across the fog
+// and the clouds behind it (owner's screenshot). Half a slice of per-pixel jitter on the lookup turns
+// the bands into grain the temporal resolve averages away. One hash.
+fn fog_slice_dither(uv: vec2<f32>) -> f32 {
+#ifdef FOG_DITHER
+    let h = fract(sin(dot(floor(uv * vec2<f32>(4096.0, 2304.0)), vec2<f32>(12.9898, 78.233))) * 43758.5453);
+    return (h - 0.5) / 32.0;
+#else
+    return 0.0;
+#endif
 }
 // Whole world: ONLY the layered (ground/valley) fog in front of a surface, without the classic
 // distance ramp -- that ramp is pinned to the island's fog range and would erase terrain 20+ km out.
@@ -711,7 +724,7 @@ fn apply_layered_fog(rgb: vec3<f32>, world_pos_rel: vec3<f32>) -> vec3<f32> {
     let ray_far = fog_ray_far(layer_fog_packet.control.y, frame.cam_pos.y, world_pos_rel.y / max(dist, 0.00001),
                               layer_fog_packet.camera.w, layer_fog_packet.control.w);
     let local = textureSampleLevel(layer_fog_tex, froxel_samp,
-        vec3<f32>(uv, sqrt(clamp(dist / ray_far, 0.0, 1.0))), 0.0);
+        vec3<f32>(uv, clamp(sqrt(clamp(dist / ray_far, 0.0, 1.0)) + fog_slice_dither(uv), 0.0, 1.0)), 0.0);
     return fog_transport(rgb, local);
 }
 fn apply_fog(rgb: vec3<f32>, world_pos_rel: vec3<f32>) -> vec3<f32> {
