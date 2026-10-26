@@ -103,6 +103,7 @@ struct Config
     float planSeconds = 20.0f;
     bool groupMarkers = true; // every squad on the map with its task (observer / debugging view)
     bool possession = true;   // the commander may take control of any friendly soldier
+    bool startAsSoldier = false; // startAs = "soldier": the player begins as a squad leader, not in command
 };
 
 struct Referee
@@ -251,6 +252,7 @@ bool LoadConfig(Referee& r, const ParamEntry& cfg)
     r.config.planSeconds = std::max(5.0f, Number(cfg, "planSeconds", r.config.planSeconds));
     r.config.groupMarkers = Number(cfg, "groupMarkers", 1.0f) != 0.0f;
     r.config.possession = Number(cfg, "possession", 1.0f) != 0.0f;
+    r.config.startAsSoldier = Text(cfg, "startAs", "commander") == "soldier";
     r.tuning.baseCaptureSeconds = Number(cfg, "captureSeconds", r.tuning.baseCaptureSeconds);
     r.tuning.securityRadius = Number(cfg, "securityRadius", r.tuning.securityRadius);
     r.tuning.startScore = Number(cfg, "startScore", r.tuning.startScore);
@@ -1073,6 +1075,17 @@ void Tick(Referee& r, float dt, float now)
                 if (r.config.engineSide[s] == player->GetTargetSide())
                     r.playerSide = s;
         WarLog("the war begins");
+        // startAs = "soldier": the player leads the first squad of their side. Killed, they are back
+        // in command (OnRealPlayerDead) and take over another squad from there: that is the respawn.
+        if (r.config.startAsSoldier && r.config.possession && r.playerSide != NoSide)
+            for (const GroupRecord& rec : r.groups)
+                if (rec.side == r.playerSide)
+                {
+                    std::string why;
+                    if (!Possess(rec.id, &why))
+                        LOG_WARN(Mission, "Conquest: could not start as a soldier: {}", why);
+                    break;
+                }
         for (int s = 0; s < r.war.sideCount; s++)
             r.replan[s] = true;
     }
@@ -1133,6 +1146,7 @@ void Simulate()
     }
     if (!r.active)
         return;
+    View::PrepareFonts(); // between frames: ImGui may not get new fonts inside one
     const float now = Now();
     if (r.lastTick < 0.0f)
         r.lastTick = now;

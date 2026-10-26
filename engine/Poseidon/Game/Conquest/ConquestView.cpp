@@ -25,6 +25,7 @@
 #include <Poseidon/Foundation/Modules/Modules.hpp>
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
+#include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/World/Entities/Vehicles/Transport.hpp>
 #include <Poseidon/World/Scene/Camera/CamEffects.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
@@ -87,7 +88,7 @@ Fonts& Font()
 void LoadFonts()
 {
     Fonts& f = Font();
-    if (f.tried)
+    if (f.tried || !ImGui::GetCurrentContext()) // no overlay (a headless run): nothing to load into
         return;
     f.tried = true;
     ImFontAtlas* atlas = ImGui::GetIO().Fonts;
@@ -217,6 +218,14 @@ struct SquadDraw
     float worldX = 0.0f;
     float worldY = 0.0f;
 };
+
+// The Esc menu, a mission dialog or the end screen is over the game. Not GetOptions(): that is the
+// whole menu stack (DisplayMain), set during play too. A menu over a single-player game pauses
+// it, so the simulation being off is the signal.
+bool MenuOpen()
+{
+    return GWorld && (!GWorld->IsSimulationEnabled() || GWorld->UserDialog());
+}
 
 void SetStatus(const std::string& text, ImU32 colour = ColGood)
 {
@@ -860,6 +869,138 @@ void DrawTopBar(const Snapshot& snap)
     ImGui::End();
 }
 
+// ---- the soldier's HUD (the commander view closed) ----
+
+// War events worth a banner: captures, losses of ground, the end. Picked from the referee's log
+// as it grows, so the soldier hears about the war without opening the map.
+struct Banner
+{
+    std::string text;
+    ImU32 colour = ColText;
+    Uint64 ticks = 0;
+};
+
+Banner& LastBanner()
+{
+    static Banner b;
+    return b;
+}
+
+void CatchBanners(const Snapshot& snap)
+{
+    static std::string lastSeen;
+    if (snap.log.empty())
+        return;
+    if (lastSeen.empty())
+    {
+        lastSeen = snap.log.back(); // the war's history before the HUD first looked is not news
+        return;
+    }
+    for (auto it = snap.log.rbegin(); it != snap.log.rend() && *it != lastSeen; ++it)
+    {
+        const std::string& line = *it;
+        const bool capture = line.find(" captured ") != std::string::npos;
+        const bool lost = line.find(" neutralised ") != std::string::npos;
+        const bool end = line.find(" wins the war") != std::string::npos;
+        if (!capture && !lost && !end)
+            continue;
+        // "12:34 WEST captured Montignac" -> "BLUFOR captured Montignac", in that side's colour.
+        std::string text = line.size() > 6 ? line.substr(6) : line;
+        int side = NoSide;
+        for (int s = 0; s < static_cast<int>(snap.sideNames.size()); s++)
+            if (text.rfind(snap.sideNames[s], 0) == 0)
+            {
+                side = s;
+                text = SideTitle(s) + text.substr(snap.sideNames[s].size());
+            }
+        LastBanner() = {text, side == NoSide ? ColText : SideColour(side), SDL_GetTicks()};
+        break; // the newest one wins
+    }
+    lastSeen = snap.log.back();
+}
+
+void DrawSoldierHud(const Snapshot& snap)
+{
+    const ImGuiIO& io = ImGui::GetIO();
+    ImDrawList* draw = ImGui::GetForegroundDrawList();
+    const Fonts& f = Font();
+    const int me = PlayerSide();
+
+    // A slim war bar at the top: both scores, objectives held, how to open the commander view.
+    {
+        char text[160];
+        int owned = 0;
+        for (const ObjectiveState& s : snap.war.states)
+            if (s.owner == me)
+                owned++;
+        std::snprintf(text, sizeof(text), "Objectives %d / %d", owned, static_cast<int>(snap.war.states.size()));
+        const float barW = 90.0f;
+        const float width = 2.0f * (barW + 120.0f) + Measure(f.bold, 14.0f, text).x + 150.0f;
+        const ImVec2 a(io.DisplaySize.x * 0.5f - width * 0.5f, 10.0f), b(io.DisplaySize.x * 0.5f + width * 0.5f, 44.0f);
+        draw->AddRectFilled(a, b, WithAlpha(ColPanel, 0.82f), 17.0f);
+        float x = a.x + 18.0f;
+        for (int s = 0; s < snap.war.sideCount; s++)
+        {
+            char score[48];
+            std::snprintf(score, sizeof(score), "%s %.0f", SideTitle(s).c_str(), snap.war.score[s]);
+            Put(draw, f.bold, 14.0f, ImVec2(x, 19.0f), SideColour(s), score);
+            x += Measure(f.bold, 14.0f, score).x + 10.0f;
+            const float share = snap.tuning.startScore > 0.0f ? std::clamp(snap.war.score[s] / snap.tuning.startScore, 0.0f, 1.0f) : 0.0f;
+            draw->AddRectFilled(ImVec2(x, 24.0f), ImVec2(x + barW, 30.0f), IM_COL32(255, 255, 255, 30), 3.0f);
+            draw->AddRectFilled(ImVec2(x, 24.0f), ImVec2(x + barW * share, 30.0f), SideColour(s), 3.0f);
+            x += barW + 20.0f;
+        }
+        Put(draw, f.bold, 14.0f, ImVec2(x, 19.0f), ColText, text);
+        x += Measure(f.bold, 14.0f, text).x + 18.0f;
+        Put(draw, f.body, 13.0f, ImVec2(x, 20.0f), ColMuted, "Ctrl+M  Command");
+    }
+
+    // Inside an objective: its capture bar, front and centre.
+    Person* player = GWorld ? GWorld->GetRealPlayer() : nullptr;
+    if (player)
+    {
+        const Vector3 p = player->Position();
+        for (size_t o = 0; o < snap.war.defs.size(); o++)
+        {
+            const ObjectiveDef& d = snap.war.defs[o];
+            if (std::hypot(p.X() - d.x, p.Z() - d.y) > d.radius)
+                continue;
+            const ObjectiveState& st = snap.war.states[o];
+            const char* state = st.contested ? "CONTESTED"
+                                : st.owner == me && st.holder == me && st.level >= 1.0f ? "SECURE"
+                                : st.holder == me ? "CAPTURING"
+                                : st.owner == NoSide && st.level <= 0.0f ? "NEUTRAL"
+                                                                          : "LOSING GROUND";
+            const ImU32 stateColour = st.contested ? ColWarn : st.holder == me ? ColGood : st.owner == NoSide ? ColMuted : ColBad;
+            const float w = 340.0f;
+            const ImVec2 a(io.DisplaySize.x * 0.5f - w * 0.5f, 56.0f), b(io.DisplaySize.x * 0.5f + w * 0.5f, 122.0f);
+            draw->AddRectFilled(a, b, WithAlpha(ColPanel, 0.86f), 14.0f);
+            draw->AddRect(a, b, WithAlpha(SideColour(st.owner), 0.7f), 14.0f, 0, 1.5f);
+            Put(draw, f.display, 20.0f, ImVec2(a.x + 18.0f, a.y + 10.0f), ColText, d.name.c_str());
+            const float sw = Measure(f.bold, 14.0f, state).x;
+            Put(draw, f.bold, 14.0f, ImVec2(b.x - sw - 18.0f, a.y + 14.0f), stateColour, state);
+            const ImVec2 ba(a.x + 18.0f, a.y + 44.0f), bb(b.x - 18.0f, a.y + 52.0f);
+            draw->AddRectFilled(ba, bb, IM_COL32(255, 255, 255, 30), 4.0f);
+            draw->AddRectFilled(ba, ImVec2(ba.x + (bb.x - ba.x) * st.level, bb.y), SideColour(st.holder), 4.0f);
+            break;
+        }
+    }
+
+    // The latest capture, loss or ending, for five seconds.
+    const Banner& banner = LastBanner();
+    const Uint64 age = SDL_GetTicks() - banner.ticks;
+    if (!banner.text.empty() && age < 5000)
+    {
+        const float alpha = age > 4200 ? 1.0f - static_cast<float>(age - 4200) / 800.0f : 1.0f;
+        const ImVec2 t = Measure(f.display, 22.0f, banner.text.c_str());
+        const ImVec2 c(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.28f);
+        draw->AddRectFilled(ImVec2(c.x - t.x * 0.5f - 24.0f, c.y - 22.0f), ImVec2(c.x + t.x * 0.5f + 24.0f, c.y + 22.0f),
+                            WithAlpha(ColPanel, 0.85f * alpha), 22.0f);
+        Put(draw, f.display, 22.0f, ImVec2(c.x - t.x * 0.5f, c.y - t.y * 0.5f), WithAlpha(banner.colour, alpha),
+            banner.text.c_str());
+    }
+}
+
 void DrawToast()
 {
     const State& s = St();
@@ -1192,6 +1333,9 @@ bool ProcessEvent(const SDL_Event& event)
 {
     State& s = St();
     s.consumeMouse = s.consumeKeyboard = false;
+    // The HUD's typefaces, loaded between frames (here) rather than inside one.
+    if (!Font().tried && PlayerSide() != NoSide)
+        LoadFonts();
     if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.scancode == SDL_SCANCODE_M &&
         (event.key.mod & SDL_KMOD_CTRL) != 0)
     {
@@ -1206,7 +1350,7 @@ bool ProcessEvent(const SDL_Event& event)
     if (!s.active)
         return false;
     // The Esc menu (and mission dialogs) keep working over the commander view.
-    if (GWorld && (GWorld->GetOptions() || GWorld->UserDialog()))
+    if (MenuOpen())
         return false;
     const bool overHud = ImGui::GetIO().WantCaptureMouse;
     switch (event.type)
@@ -1268,6 +1412,11 @@ bool ProcessEvent(const SDL_Event& event)
     return false;
 }
 
+void PrepareFonts()
+{
+    LoadFonts();
+}
+
 bool WantsMouse()
 {
     return St().active && St().consumeMouse;
@@ -1288,7 +1437,16 @@ void Frame()
         SetStatus("The soldier you controlled was killed. You are back in command.", ColWarn);
     }
     if (!s.active)
+    {
+        // The soldier's HUD: the war bar, the capture bar in a zone, capture banners.
+        const Snapshot& snap = GetSnapshot();
+        if (snap.active && PlayerSide() != NoSide && Font().tried && !MenuOpen())
+        {
+            CatchBanners(snap);
+            DrawSoldierHud(snap);
+        }
         return;
+    }
     if (PlayerSide() == NoSide || !GLandscape || !s.camera)
     {
         SetActive(false);
@@ -1297,7 +1455,7 @@ void Frame()
     const Uint64 now = SDL_GetTicks();
     const float dt = std::clamp(static_cast<float>(now - s.lastTicks) / 1000.0f, 0.0f, 0.1f);
     s.lastTicks = now;
-    if (!(GWorld && (GWorld->GetOptions() || GWorld->UserDialog())))
+    if (!MenuOpen())
         Pan(dt);
     ApplyCamera();
 
@@ -1321,6 +1479,7 @@ void Frame()
     const Snapshot& snap = GetSnapshot();
     if (!snap.active)
         return;
+    CatchBanners(snap);
     PushTheme();
     DrawTopBar(snap);
     DrawSquadList(snap, squads);

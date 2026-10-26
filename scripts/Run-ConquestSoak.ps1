@@ -95,6 +95,12 @@ try {
         if ($p.HasExited -or [DateTime]::UtcNow -gt $deadline) { throw 'Conquest never became active' }
         Start-Sleep -Seconds 2
     }
+    # A mission may start the player as a squad leader (startAs = "soldier"). Picture the soldier's
+    # HUD, then hand the squad back to the AI: the soak watches an NPC-only war.
+    Start-Sleep -Seconds 4
+    $null = Send @{cmd = 'screenshot'; path = (Join-Path $out 'soldier-hud.png') }
+    $null = Eval 'conquestCommanderView true'
+    $null = Eval 'conquestCommanderView false'
     Sqf "setAccTime $AccTime"
     if ($CommanderTest) {
         # The player commands WEST: select the squad nearest Morton, then send it to Montignac.

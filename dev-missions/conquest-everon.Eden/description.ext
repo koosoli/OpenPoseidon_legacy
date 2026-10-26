@@ -9,6 +9,8 @@ class CfgConquest
     startSquads[] = {"Motorised", "Rifle", "Recon"}; // free, at each HQ when the war begins
     cap = 60;          // living soldiers per side
     planSeconds = 20;  // the commanders replan this often, and at once on a capture
+    startAs = "soldier"; // lead the first squad; Ctrl+M opens the commander view, death returns you there
+    possession = 1;      // allow taking control of any friendly squad leader (the commander view's switch)
 
     // What a side can buy. <SIDE>[] are the soldiers, <SIDE>vehicles[] spawn empty beside them and
     // belong to the squad: it mounts for moves over 200 m and gets out near its destination.

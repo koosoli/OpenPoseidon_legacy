@@ -26,6 +26,10 @@ bool ProcessEvent(const SDL_Event& event);
 bool WantsMouse();
 bool WantsKeyboard();
 
-/// Once per rendered frame inside the overlay's ImGui frame: moves the camera, draws the view.
+/// Once per rendered frame inside the overlay's ImGui frame: moves the camera, draws the view
+/// (or, while it is closed, the soldier's HUD).
 void Frame();
+
+/// Loads the HUD's typefaces; called between frames by the referee while a war runs.
+void PrepareFonts();
 } // namespace Poseidon::Conquest::View
