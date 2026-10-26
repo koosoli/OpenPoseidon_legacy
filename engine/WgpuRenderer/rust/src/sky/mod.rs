@@ -78,7 +78,7 @@ fn sky_wgsl_validates_with_cloud_ms() {
     }
 }
 
-// CLOUD-DECK (WGR_CLOUD_DECK=1): the two-stream deck term validates with and without CLOUD_MS and WHOLE_WORLD.
+// CLOUD-DECK (default; WGR_CLOUD_DECK=0 = off): the two-stream deck term validates with and without CLOUD_MS and WHOLE_WORLD.
 #[test]
 fn sky_wgsl_validates_with_cloud_deck() {
     for mask in 0u32..4 {
@@ -94,6 +94,9 @@ fn sky_wgsl_validates_with_cloud_deck() {
             .validate(&module)
             .unwrap_or_else(|e|panic!("sky.wgsl with CLOUD_DECK (mask {mask}) fails validation: {e:?}"));
         assert!(format!("{module:?}").contains("deck_td"),"CLOUD_DECK did not compile in");
+    }
+    if std::env::var("WGR_CLOUD_DECK").as_deref()!=Ok("0") {
+        assert!(crate::shaders::shader_defs().contains_key("CLOUD_DECK"),"CLOUD_DECK is not on by default");
     }
 }
 

@@ -525,6 +525,7 @@ void Weather::Init()
     _rainDensity = 0;
     _rainDensityWanted = 0;
     _rainDensitySpeed = 1;
+    _rainScripted = false;
     _windSpeed = VZero;
     _lastWindSpeedChange = Glob.time;
     _gust = VZero;
@@ -542,6 +543,7 @@ void Weather::SetRain(float density, float time)
     saturateMax(time, 0.001);
     _rainDensityWanted = density;
     _rainDensitySpeed = fabs(_rainDensityWanted - _rainDensity) / time;
+    _rainScripted = true;
 }
 
 void Weather::SetOvercast(Landscape* land, float overcast)
@@ -641,19 +643,32 @@ void Weather::MoveClouds(float deltaT)
 
     // simulate rain
     float maxRain = _overcastSetClouds * 1.5 - 1;
+    if (_rainScripted)
+    {
+        // Rain set by the mission goes where it was set and stays there: no random walk away
+        // from it under heavy cloud, no forced dry under light cloud. Thunder follows the rain.
+        float delta = _rainDensityWanted - _rainDensity;
+        Limit(delta, -_rainDensitySpeed * deltaT, +_rainDensitySpeed * deltaT);
+        _rainDensity += delta;
+        saturate(_rainDensity, 0, 1);
+        maxRain = std::min(maxRain, _rainDensity);
+    }
     if (maxRain > 0.01)
     {
-        if (fabs(_rainDensityWanted - _rainDensity) < 1e-6)
+        if (!_rainScripted && fabs(_rainDensityWanted - _rainDensity) < 1e-6)
         {
             saturate(maxRain, 0, 1);
             _rainDensityWanted = _rainDensity + (GRandGen.RandomValue() - 0.5) * 0.5 * maxRain;
             saturate(_rainDensityWanted, 0, maxRain);
             _rainDensitySpeed = (GRandGen.RandomValue() + 0.1) * 0.01;
         }
-        float delta = _rainDensityWanted - _rainDensity;
-        Limit(delta, -_rainDensitySpeed * deltaT, +_rainDensitySpeed * deltaT);
-        _rainDensity += delta;
-        saturate(_rainDensity, 0, 1);
+        if (!_rainScripted)
+        {
+            float delta = _rainDensityWanted - _rainDensity;
+            Limit(delta, -_rainDensitySpeed * deltaT, +_rainDensitySpeed * deltaT);
+            _rainDensity += delta;
+            saturate(_rainDensity, 0, 1);
+        }
         const float thold = 0.4;
         if (maxRain >= thold)
         {
@@ -724,7 +739,7 @@ void Weather::MoveClouds(float deltaT)
             }
         }
     }
-    else
+    else if (!_rainScripted)
     {
         _rainDensityWanted = 0;
         _rainDensity = 0;

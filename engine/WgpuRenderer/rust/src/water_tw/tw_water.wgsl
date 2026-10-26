@@ -45,6 +45,8 @@ const GLINT_SHARE: f32 = 0.6;
 const GLINT_CELL: f32 = 0.05;
 const GLINT_TOL: f32 = 0.5;
 const GLINT_RADIUS: f32 = 0.4;
+// the brightest a glint may get, in units of the smooth highlight (half-float range)
+const GLINT_CAP: f32 = 30.0;
 // integer hashes (Jarzynski & Olano 2020, pcg3d / pcg4d): a handful of integer ops where the
 // sin-based hash cost a sin each, and a facet needs eleven random numbers
 fn glintPcg3(v0: vec3<u32>) -> vec3<f32> {
@@ -97,7 +99,7 @@ fn glintFacet(xz: vec2<f32>, cell: f32, lvl: u32, need: vec2<f32>, sig: f32, fp:
     // gives 0.50-0.52 for footprints up to 0.75 cell. The earlier pi (r + fp/4)^2 grew with the
     // footprint and left the far glitter path up to half too dark.
     let ec = 3.14159265 * r * r / (cell * cell);
-    return min(w * cover / max(ew * ec, 1e-4), 30.0);
+    return min(w * cover / max(ew * ec, 1e-4), GLINT_CAP);
 }
 
 override linear: f32 = 1.0;

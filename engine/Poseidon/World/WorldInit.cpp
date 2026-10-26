@@ -240,6 +240,10 @@ void World::InitGeneral()
     _speedOvercast = 1.0 / (60 * 60);
     _speedFog = 1.0 / (60 * 60);
     _weatherTime = 0;
+    if (GLandscape)
+    {
+        GLandscape->ClearScriptedRain();
+    }
     _nextWeatherChange = 0;
     _firstFrame = true;
 
@@ -257,6 +261,10 @@ void World::InitGeneral(const ParamEntry& cfg)
     _speedOvercast = fabs(_wantedOvercast - _actualOvercast) / (30 * 60);
     _speedFog = fabs(_wantedFog - _actualFog) / (30 * 60);
     _weatherTime = 0;
+    if (GLandscape)
+    {
+        GLandscape->ClearScriptedRain();
+    }
     _nextWeatherChange = 30 * 60;
     _nearImportanceDistributionTime = Poseidon::Foundation::Time(0);
     _farImportanceDistributionTime = Poseidon::Foundation::Time(0);
@@ -294,6 +302,10 @@ void World::InitGeneral(ArcadeIntel& intel)
     _speedOvercast = fabs(_wantedOvercast - _actualOvercast) / (30 * 60);
     _speedFog = fabs(_wantedFog - _actualFog) / (30 * 60);
     _weatherTime = 0;
+    if (GLandscape)
+    {
+        GLandscape->ClearScriptedRain();
+    }
     _nextWeatherChange = 30 * 60;
     _nearImportanceDistributionTime = Poseidon::Foundation::Time(0);
     _farImportanceDistributionTime = Poseidon::Foundation::Time(0);

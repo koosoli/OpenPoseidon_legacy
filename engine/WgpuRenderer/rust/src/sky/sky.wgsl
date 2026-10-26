@@ -2869,7 +2869,13 @@ fn fs_cloud(in: VsOut) -> @location(0) vec4<f32> {
 
     // PERF-CLOUD-TEMPORAL: three pixels in four of an all-sky, upward neighbourhood take last
     // frame's march at this direction; the fourth (the rotating phase) marches as always.
-    if (cloud_tc.params.x > 0.5 && d == 0.0 && dir.y > 0.02) {
+    // Not from inside the deck or within 500 m of it (owner, 2026-10-26: "in the clouds i can see a
+    // horizontal line in the middle of the screen when looking in the direction of the horizon"):
+    // the reuse looks a pixel up by direction alone, which holds for cloud kilometres away, but in
+    // the deck the cloud is metres off, so above dir.y 0.02 the view showed last frames' march --
+    // smeared by the flight and on a stale jitter -- and below it a fresh one, meeting at the horizon.
+    let deck_far = length(pos) < cloud_shell_bot() - 500.0 || length(pos) > cloud_shell_top() + 500.0;
+    if (cloud_tc.params.x > 0.5 && d == 0.0 && dir.y > 0.02 && deck_far) {
         let hp = vec2<u32>(in.clip.xy);
         let phase = (hp.x & 1u) | ((hp.y & 1u) << 1u);
         if (phase != u32(cloud_tc.params.y) && cloud_sky_neighbourhood(in.uv, dd)) {
