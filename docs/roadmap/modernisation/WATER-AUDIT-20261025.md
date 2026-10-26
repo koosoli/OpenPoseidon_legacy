@@ -250,6 +250,60 @@ against the current water, sky or rain cost.
 
 Each port keeps the MIT copyright line of its source in the file header, as our Tidewater port does.
 
+## Final state, 2026-10-26 (afternoon)
+
+The owner tested every item in game, in smoke-test windows run from bin folders under the game lock. What was signed
+off went to the main session to merge and deploy; this section supersedes the status table below where they differ.
+
+| Item | Final state | Where | Switch |
+|---|---|---|---|
+| Rain on the ocean | **Default on** while it rains | deployed `c66752aa0` | `WGR_SEA_RAIN=0` |
+| Cloud multiple scattering | **Default on** | deployed `4d5350ba5` | `WGR_CLOUD_MS=0` |
+| Two-stream overcast deck | **Default on** (signed off) | `claude/look-pack` | `WGR_CLOUD_DECK=0` |
+| Sea specular AA | **Default on** (signed off) | `claude/look-pack` | `WGR_SEA_SPECAA=0` |
+| Sun glitter | **Default on** (signed off), rebuilt as additive sparkles | `claude/look-pack` | Dev tools > Water > "TW sun glitter" (run time, saved in the water-look profile as `tidewaterGlitter`); `WGR_SEA_GLINTS=0` compiles it out |
+| Overcast without forced rain | **Done** (owner request) | `claude/look-pack` | A mission's `setRain` (or the Weather tab's Rain slider) holds; a mission that never sets rain keeps OFP's overcast rain above 0.67 |
+| Line inside the overcast at the horizon | **Fixed** (owner report) | `claude/look-pack` | none |
+| Line under big waves | **Fixed**, confirmed by the owner in game | `claude/look-pack` @ `984291d96` | none |
+| Fire box edges in strong wind | **Fixed** (signed off) | `claude/fire-multigrid` @ `849a8957a` | none |
+| Fire light volume / smooth flames / multigrid | Built, **off** (little visible difference) | `claude/fire-multigrid` | `WGR_FIRE_LIGHT/SMOOTH/MG=1` |
+| Two-stage whitecaps | Built, **off**, not recommended | `claude/look-pack` | `WGR_TW_FOAM2=1` |
+| Lens film and drops | **Dropped** (owner) | removed | n/a |
+| Hydrodynamic modulation | Built, **off**, awaiting the owner's in-game look. Equal cost (water draw, lowest samples of two rounds: 0.58 / 0.57 ms caps view, 0.75 / 0.72 ms sun view). The sun path breaks up on the crests and the troughs stay glassier. | `claude/look-pack` | `WGR_SEA_HYDRO=1` |
+| Downwind froth smear | Built, **off**, awaiting the owner's in-game look. Equal cost (0.58 / 0.56 and 0.75 / 0.75 ms). Barely visible in stills; a cap's trail reads in motion, if at all. | `claude/look-pack` | `WGR_SEA_SMEAR=1` |
+
+### What the owner's reports turned out to be
+
+- **Too little glitter.** The energy-conserving glints took 60-90% of the smooth highlight from every pixel and gave
+  it back to the few a facet lit; at any share that read as the path dimmed and etched with dark rims. They are now
+  added on top of the whole highlight at 8x its peak (the tone curve clips them white), over capillary slopes wider
+  than the resolved waves, so they spread past the path toward the horizon. One facet octave for most pixels, gated at
+  2.5 spreads. Cost about +0.1 ms of water draw near the eye, within noise from altitude.
+- **A line in the overcast.** The cloud composite blanked geometry pixels whose depth matched no low-res tap. At the
+  grazing horizon no row matches its neighbours, so a band lost the deck: stripes three pixels apart. Geometry is now
+  filtered from geometry taps and blanked only as a sliver in front of all of them.
+- **A line under big waves (two causes).** (1) The cloud deck was composited over a wave's face above eye level (the
+  water writes no depth): from below half the deck base the clouds now go in before the water. (2) Under the water,
+  a surface point was "seen from below" when it lay above the eye, which cut the frame at eye level; it is now seen
+  from below when the view ray goes up through its normal.
+- **Overcast always meant rain.** `Weather::MoveClouds` random-walked the rain above 0.67 overcast and forced it to 0
+  below, overriding `setRain`. A set rain now holds; new missions start on OFP's rule again.
+- **Fire box visible in wind.** The 10% flat fade drew the box wall through leaning smoke; the fade is now 15% at the
+  sides and 25% at the top, behind a drifting ripple.
+
+### Ideas from the three repos left unbuilt, and why
+
+| Idea | Source | Why not |
+|---|---|---|
+| Chromatic caustics | minamo | Faint on our seabeds; three splats or a dispersion lookup for little. |
+| Exact waterline filtering | minamo | Fixes stair-steps along the waterline nobody has reported. |
+| Footprint-averaged surf profiles | napali | Only if far breaker bands shimmer; not reported. |
+| Cascade anti-tiling | napali | Only if tiling shows from altitude (helicopters, Earth). ~4 taps. |
+| Crest sectioning, lobed swash | napali | We have breakers and swash; a look change to compare only on request. |
+| Storm decks, rain curtains, shafts | open-water | Weather-scene look; only if storm skies are wanted. |
+| Elfouhaily spectrum | open-water | Not clearly better than ours at our scale. |
+| Full LEAN slope moments | open-water | 2 MB and 4 fetches per pixel; its free core went in as specular AA. |
+
 ## Status, 2026-10-26
 
 Every item was built behind its own switch, and each stays off by default until the owner signs it off. Each one was
