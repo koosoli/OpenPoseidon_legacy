@@ -733,3 +733,76 @@ fill (a scripted spawn) rather than the war's own purchasing.
   mortars, the air strike dropping on its point, a plane shot down dropping nothing, one plane at a time,
   Malden's war made from its 14 towns (HQs Goisse, Le Port, and La Riviere for the Resistance). Not checked: the vote and the one-commander rule in a real multiplayer game (the harness
   refuses commands in multiplayer), the end screen's New war by hand.
+
+### Status 2026-10-26 (evening): options, multiplayer arsenal, islands in multiplayer, squad commands, stuck squads
+
+- **Setup options:** a time limit (0 = off, up to 4 hours; then the higher war score wins, the top bar counts down)
+  and "the Resistance fights with WEST" (with the Resistance on). Allies (`War::allied`) never attack each other's
+  objectives, an ally's men count as the owner's in its zones (`MergeAllies`), an ally near a base does not block
+  deploying there, and the war ends when only allies are left. `setFriend` makes the AI agree.
+- **Arsenal charging in multiplayer:** the classic Gear screen's takes (VehicleSupply in `Transport.cpp`: take
+  weapon, take magazine, rearm) check and charge an arsenal box like the physical inventory does; the clients
+  learn which boxes are arsenals from `conquestNet`, and a client's charge goes to the server ("arsenal" request).
+  This also covers single player's action-menu takes, which were free before.
+- **Multiplayer missions for Malden, Kolgujev and Nogova** (`mpmissions/conquest-*-mp.*`): eight player slots a
+  side and the respawn markers at the HQs the generator picks for each island (Malden: Goisse / Le Port; Nogova:
+  Mokra vrata / Okrouhlo; Kolgujev: the grid squares 043-028 / 118-105).
+- **Kolgujev has no town names** in the game's config (CfgWorlds >> Cain >> Names is empty), so its war could not
+  start. Its objectives.hpp now lists the island's 21 settlements, found from the world file's buildings
+  (clusters of five or more within 250 m), named by map grid; `CfgConquest >> Places` feeds the generator.
+- **The soldier cap is 80 a side** (160 alive measured at about 1 ms of AI a tick); 55 a side with three sides.
+  Each side now starts with two tanks.
+- **Situation reports on the radio:** the LLM commander's answer carries a `"radio"` report HQ reads out; sides on
+  the standard commander get HQ's own report every 5 minutes (towns held, the fighting, the threatened town).
+- **AI & voice panel:** a quick setup with one Google AI Studio key for the model, voice input and voices; the
+  model picked from the provider's own list, reset to the provider's default on a change of provider; a change of
+  voice provider resets the voices to its male pool; the panel says why Windows voices speak (no key, Google Cloud
+  picked instead of Gemini, a refusal). Hold-to-talk moved from Caps Lock (the game's voice-over-net key) to U.
+- **The owner's LLM never answered:** `gemini-3.8-live` is a realtime voice model ("only supports real-time
+  bidirectional streaming via WebSocket"): 16 of 16 requests refused with HTTP 400. Live, native-audio and
+  realtime models are no longer offered for chat, and the commander falls back to the provider's default model
+  (once more on a refusal of the model itself), saying so in the war log. A voice pool picked for another
+  provider (the owner's held ElevenLabs voice ids under Gemini) is replaced by Gemini's male voices.
+- **Command view:** C (or the bar's Me) centres on the player's own soldier and follows him; zoom out to 9 km; the
+  selected squads' routes are drawn in steps (shown even with one end off screen) and on the minimap, and squads
+  without a move order show the task's objective; contextual commands for selected squads: Engage, Hold fire,
+  Stop, Board, Get out / Land and unload, Land, To base (`conquestSquad` from a script).
+- **Helicopters no longer hover over the drop:** the dismount ordered the pilot out with the passengers; a pilot
+  cannot leave a flying helicopter, so it hovered for ever. Now the helicopter is told to land for its passengers
+  and its pilot stays at the controls.
+- **Squads standing about:** every captured town kept its capturing squad as a garrison until threatened, and a
+  rear town never is; with 18 villages most of an army ended up guarding its own back yard. Rear towns (every
+  neighbour the side's own) keep no garrison now. Stuck squads (no progress for 90 s and not fighting) are nudged:
+  a truck or APC squad gets out and walks, a squad on foot is ordered again by a point to the side.
+- **Supply lines** (owner, 2026-10-26): the HQ spends the side's pool (the towns' income goes there); every
+  other base keeps its own stock, spent by deploying there and by its arsenal. A base's stock barely grows by
+  itself (2 a minute) and is lost when the base changes hands (`StepCapture`). Supply trucks (`Supply`: a crew
+  in a Truck5tReammo / UralReammo, deployed at the HQ only) load up to 300 at the HQ, drive to the base that
+  needs them most (little stock, on the front, not already served), unload and come back; a destroyed truck
+  loses its load. The AI keeps one truck for every three bases (at most three). The commander can click a
+  base's command tent for its card (supplies, Deploy here, Send a supply truck), right-click a base with a
+  supply truck selected, or put any squad with a truck of its own on "Supply runs" (and back with "Fight").
+  `ConquestRefereeSupply.inc`.
+- **No idle squads** (owner): a squad without a task always gets the AI's (attack, take, secure); while a human
+  commands, the AI only fills in and never re-tasks a busy squad; a bought squad waits 2 minutes for orders.
+- **Support waits 5 minutes** (`supportDelay = 300`): no mortars or air strikes, the AI's included, in the
+  war's first minutes, so nobody shells a freshly deployed base.
+- **Engage a target:** the Engage button, then a click on a building or vehicle (within 30 m; not the war's
+  own posts, flags and arsenals): the selected squads attack it (`AIGroup::Attack`), a gunship flies in on it.
+- **Helicopters** unload with only the pilot aboard and then set down and stay (no more trailing the squad at
+  40 m); checked: the Mi-17 at Tyrone on the ground with its pilot alone.
+- **Vehicles park apart:** each base hands out parking slots behind it, 28 m apart (45 m for helicopters), so
+  the starting trucks, tanks and helicopter no longer appear on one spot.
+- **Command view:** enemy markers are a setup option (off by default; set before the war); the mouse wheel
+  zooms on a selected soldier or squad, else where the cursor points.
+- **Soak 2026-10-26 (40 game minutes, 4x):** 25 captures and 2 neutralisations, the supply line ran (6 runs,
+  4 delivered); 37 of 42 stuck-nudges were one tank and one helicopter squad already at their town, so a nudge
+  now needs the squad outside the town and no helicopter landing. WEST barely bought: the soak opened the
+  command view at the start, which handed WEST to "the player"; the soak now starts with `noview`.
+- **What a squad is doing, in words:** the squad list and the label over a selected squad say what it is doing
+  there, from the referee (`Doing`): "Supply run to Figari (300)", "Back to the HQ for supplies", "Taking
+  Tyrone", "Attacking Gravette", "Securing Meaux", "Engaging Zelt", "Holding position, as ordered", "Awaiting
+  orders", "(landing to unload)"; clients get the server's words with each squad.
+- **File split:** the referee's air support, supply line, contextual orders and multiplayer command moved to
+  `ConquestRefereeAir.inc`, `ConquestRefereeSupply.inc`, `ConquestRefereeOrders.inc` and
+  `ConquestRefereeCommand.inc` (the FileSize gate stops at 5000 lines).

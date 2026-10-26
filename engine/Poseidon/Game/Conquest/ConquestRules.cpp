@@ -24,6 +24,32 @@ void StartWar(War& war, const Tuning& tuning, float startPool)
     }
 }
 
+bool Allied(const War& war, int a, int b)
+{
+    return a != b && a >= 0 && b >= 0 && a < MaxSides && b < MaxSides && war.allied[a][b];
+}
+
+namespace
+{
+// Allies in one zone count as one force: with the owner's, for the owner; otherwise for the stronger.
+Presence MergeAllies(const War& war, int index, const Presence& in)
+{
+    Presence p = in;
+    const int owner = war.states[index].owner;
+    for (int a = 0; a < war.sideCount; a++)
+        for (int b = a + 1; b < war.sideCount; b++)
+        {
+            if (!Allied(war, a, b) || p.strength[a] + p.strength[b] <= 0.0f)
+                continue;
+            const int keep = owner == a ? a : owner == b ? b : p.strength[a] >= p.strength[b] ? a : b;
+            const int fold = keep == a ? b : a;
+            p.strength[keep] += p.strength[fold];
+            p.strength[fold] = 0.0f;
+        }
+    return p;
+}
+} // namespace
+
 int OwnedCount(const War& war, int side, bool countHQs)
 {
     int n = 0;
@@ -38,8 +64,8 @@ bool CanAttack(const War& war, int side, int index)
     if (side == NoSide || index < 0 || index >= static_cast<int>(war.defs.size()))
         return false;
     const ObjectiveState& s = war.states[index];
-    if (s.owner == side)
-        return false;
+    if (s.owner == side || Allied(war, side, s.owner))
+        return false; // its own, or an ally's
     // An HQ falls last: while its owner still holds anything else, it cannot be attacked.
     if (war.defs[index].kind == ObjectiveKind::HQ && s.owner != NoSide && OwnedCount(war, s.owner) > 1)
         return false;
@@ -93,8 +119,9 @@ float CaptureMargin(const Presence& presence, int sideCount, int side)
     return std::max(0.0f, presence.strength[side] - other);
 }
 
-CaptureResult StepCapture(War& war, int index, const Presence& presence, float dt, float now, const Tuning& tuning)
+CaptureResult StepCapture(War& war, int index, const Presence& measured, float dt, float now, const Tuning& tuning)
 {
+    const Presence presence = MergeAllies(war, index, measured);
     CaptureResult result;
     ObjectiveState& s = war.states[index];
     bool contested = false;
@@ -152,6 +179,7 @@ CaptureResult StepCapture(War& war, int index, const Presence& presence, float d
             s.owner = side;
             s.capturedAt = now;
             result.event = CaptureEvent::Captured;
+            s.stock = 0.0f; // what the old owner kept here is gone
             result.side = side;
         }
         return result;
@@ -173,6 +201,7 @@ CaptureResult StepCapture(War& war, int index, const Presence& presence, float d
             s.owner = NoSide;
             s.capturedAt = now;
             result.event = CaptureEvent::Neutralised;
+            s.stock = 0.0f;
             result.side = side;
         }
     }
@@ -237,13 +266,17 @@ int StepEconomy(War& war, float dt, const Tuning& tuning)
     }
     int alive = 0;
     int last = NoSide;
+    bool allies = true; // everyone left fights on the same side
     for (int side = 0; side < war.sideCount; side++)
         if (!war.defeated[side])
         {
+            if (last != NoSide && !Allied(war, side, last))
+                allies = false;
             alive++;
-            last = side;
+            if (last == NoSide || OwnedCount(war, side) > OwnedCount(war, last))
+                last = side;
         }
-    return alive == 1 ? last : NoSide;
+    return alive == 1 || (alive > 1 && allies) ? last : NoSide;
 }
 
 int TownVictor(const War& war, int towns)
@@ -259,6 +292,20 @@ int TownVictor(const War& war, int towns)
             best = side;
             most = held;
         }
+    }
+    return best;
+}
+
+int ScoreLeader(const War& war)
+{
+    int best = NoSide;
+    for (int side = 0; side < war.sideCount; side++)
+    {
+        if (war.defeated[side])
+            continue;
+        if (best == NoSide || war.score[side] > war.score[best] ||
+            (war.score[side] == war.score[best] && OwnedCount(war, side) > OwnedCount(war, best)))
+            best = side;
     }
     return best;
 }

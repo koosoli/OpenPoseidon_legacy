@@ -57,6 +57,7 @@ struct ObjectiveState
     float capturedAt = -1.0e9f; // game time of the last change of owner
     float lastHitAt = -1.0e9f;  // game time a friendly of the owner was last hit inside the security radius
     std::array<int, MaxSides> enemiesNear{}; // per side: enemy men of that side within the security radius
+    float stock = 0.0f; // supplies kept at this base (an HQ spends its side's pool instead); lost with the base
 };
 
 struct Tuning
@@ -100,7 +101,13 @@ struct War
     std::array<float, MaxSides> pool{};
     std::array<float, MaxSides> score{};
     std::array<bool, MaxSides> defeated{};
+    // Allied sides (the Resistance with WEST, when the setup says so): they do not attack each other's
+    // objectives, an ally's men count as the owner's in its zones, and only allies left ends the war.
+    std::array<std::array<bool, MaxSides>, MaxSides> allied{};
 };
+
+/// a and b are different sides fighting on the same side.
+bool Allied(const War& war, int a, int b);
 
 /// Starting state: initial owners hold full bars, scores at Tuning::startScore, pools at `startPool`.
 void StartWar(War& war, const Tuning& tuning, float startPool);
@@ -143,6 +150,9 @@ int StepEconomy(War& war, float dt, const Tuning& tuning);
 /// than HQs has won (towns <= 0: off). Several at once cannot happen while towns is over half of them;
 /// below that, the one holding most wins.
 int TownVictor(const War& war, int towns);
+
+/// The time limit's verdict: the undefeated side with the highest war score (more objectives breaks a tie).
+int ScoreLeader(const War& war);
 
 /// Objectives other than HQs: the most villages a victory condition can ask for.
 int TownCount(const War& war);

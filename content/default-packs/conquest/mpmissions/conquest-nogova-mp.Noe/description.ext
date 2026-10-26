@@ -1,0 +1,9 @@
+// Conquest on Nogova, multiplayer: up to eight players a side alongside the AI's squads.
+// The war is conquest.hpp, a copy of the single-player mission's (Build-Conquest.ps1 checks they match). The server
+// runs it; every client mirrors it and sends its commander's orders back (ConquestRefereeNet.inc).
+#include "conquest.hpp"
+
+onLoadMission = "Conquest: take Nogova's command posts";
+respawn = "BASE";   // back at the side's base (markers respawn_west / respawn_east) ...
+respawnDelay = 10;  // ... ten seconds after a death: the war goes on
+disabledAI = 1;     // empty player slots stay empty; the referee fields the AI's own squads

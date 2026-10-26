@@ -71,6 +71,8 @@ std::string SystemPrompt()
            " \"posture\": \"attack\" | \"balanced\" | \"defend\",\n"
            " \"buy\": \"<squad type name>\" or \"\",\n"
            " \"barrage\": \"<objective name>\" or \"\",\n"
+           " \"radio\": \"<a situation report for your soldiers, 1-2 short sentences: what is happening and what "
+           "you want from them>\",\n"
            " \"reason\": \"<one short sentence a radio operator could read out>\"}\n"
            "Weight 3 = the main effort, 1 = worth pushing, 0 = no opinion, -2 = leave it alone for now. Name only "
            "objectives and squad types from the report. You can only capture an objective next to one you hold; "
@@ -123,6 +125,8 @@ bool ParseAdvice(const std::string& text, const std::vector<std::string>& object
         out.barrage = Match(objectives, barrage->valuestring);
     if (const cJSON* reason = cJSON_GetObjectItemCaseSensitive(root, "reason"); cJSON_IsString(reason))
         out.reason = std::string(reason->valuestring).substr(0, 240);
+    if (const cJSON* radio = cJSON_GetObjectItemCaseSensitive(root, "radio"); cJSON_IsString(radio))
+        out.radio = std::string(radio->valuestring).substr(0, 300);
     cJSON_Delete(root);
     if (out.priorities.empty() && out.posture.empty() && out.buy.empty() && out.barrage.empty())
     {
@@ -162,11 +166,35 @@ bool Ask(int side, const std::string& report, const std::vector<std::string>& ob
         [job, settings, key, report, objectives, squadTypes]()
         {
             const auto t0 = std::chrono::steady_clock::now();
-            NpcChat::HttpRequest request =
-                NpcChat::BuildLlmRequest(settings, key, SystemPrompt(), {{"user", report}});
-            request.timeoutSeconds = std::max(10, settings.requestTimeoutSeconds);
-            const NpcChat::HttpResponse response = NpcChat::HttpPost(request, &job->cancel);
             Answer answer;
+            // A model that cannot chat (a live / realtime voice model, picked from the list) is never asked:
+            // the provider's default model commands instead, and the war log says so.
+            NpcChat::Settings use = settings;
+            const std::string chosen = settings.EffectiveLlmModel();
+            if (!chosen.empty() && !NpcChat::IsChatModelId(chosen))
+            {
+                use.llmModel.clear();
+                answer.note = "the model " + chosen + " cannot chat; " + use.EffectiveLlmModel() + " commands instead";
+            }
+            const auto post = [&](const NpcChat::Settings& s)
+            {
+                NpcChat::HttpRequest request = NpcChat::BuildLlmRequest(s, key, SystemPrompt(), {{"user", report}});
+                request.timeoutSeconds = std::max(10, s.requestTimeoutSeconds);
+                return NpcChat::HttpPost(request, &job->cancel);
+            };
+            NpcChat::HttpResponse response = post(use);
+            // The provider refused the model itself (unknown, retired, or not for chat): once more with
+            // its default model, rather than an LLM commander that never answers.
+            const bool modelRefused =
+                (response.status == 400 || response.status == 404) && !use.llmModel.empty() &&
+                (response.body.find("model") != std::string::npos || response.body.find("Model") != std::string::npos);
+            if (modelRefused)
+            {
+                const std::string refused = use.EffectiveLlmModel();
+                use.llmModel.clear();
+                response = post(use);
+                answer.note = "the model " + refused + " was refused; " + use.EffectiveLlmModel() + " commands instead";
+            }
             if (!response.Ok())
                 answer.error = NpcChat::DescribeHttpFailure(NpcChat::LlmProviderName(settings.llm), response);
             else

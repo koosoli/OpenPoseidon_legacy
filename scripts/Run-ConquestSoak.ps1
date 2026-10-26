@@ -96,7 +96,8 @@ try {
         Start-Sleep -Seconds 2
     }
     # The mission opens on its setup screen: start the war as WEST, leading a squad.
-    $null = Eval 'conquestStart ["WEST", "soldier"]'
+    # Both sides on the AI (no command view: an opened view hands WEST to "the player", whose supplies then pile up).
+    $null = Eval 'conquestStart ["WEST", "soldier", "contacts", "noview"]'
     # A mission may start the player as a squad leader (startAs = "soldier"). Picture the soldier's
     # HUD, then hand the squad back to the AI: the soak watches an NPC-only war.
     Start-Sleep -Seconds 4

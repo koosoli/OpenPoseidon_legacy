@@ -17,6 +17,7 @@
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
 #include <Poseidon/UI/Locale/Sentences.hpp>
 #include <Poseidon/UI/Inventory/InventoryModel.hpp>
+#include <Poseidon/Game/Conquest/ConquestReferee.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 
 #include <Poseidon/Network/Network.hpp>
@@ -470,6 +471,27 @@ bool ResourceSupply::Supply(EntityAI* vehicle, UIActionType action, int param, i
     return true;
 }
 
+namespace
+{
+// Conquest: gear from one of its arsenal boxes costs the box owner's supplies (free otherwise).
+// The check before a take, with the reason as a hint when the taker is the player ...
+bool ArsenalCan(Poseidon::EntityAI* box, bool weapon, Poseidon::EntityAI* taker)
+{
+    std::string why;
+    if (Poseidon::Conquest::ArsenalTake(box, weapon, 1, false, &why))
+        return true;
+    if (taker && taker == GWorld->PlayerOn() && GWorld->UI())
+        GWorld->UI()->ShowHint(RString(why.c_str()));
+    return false;
+}
+
+// ... and the charge once the item has moved.
+void ArsenalCharge(Poseidon::EntityAI* box, bool weapon)
+{
+    Poseidon::Conquest::ArsenalTake(box, weapon, 1, true);
+}
+} // namespace
+
 struct MagazineInWeapon
 {
     Ref<MuzzleType> muzzle;
@@ -626,6 +648,11 @@ void ResourceSupply::Simulate(float deltaT, SimulationImportance prec)
                             AUTO_STATIC_ARRAY(Ref<const Magazine>, conflict, 16);
                             if (man->CheckMagazine(magazine, conflict))
                             {
+                                if (!ArsenalCan(veh, false, man))
+                                {
+                                    _supplying = nullptr;
+                                    return;
+                                }
                                 for (int j = 0; j < conflict.Size(); j++)
                                 {
                                     const Magazine* m = conflict[j];
@@ -635,6 +662,7 @@ void ResourceSupply::Simulate(float deltaT, SimulationImportance prec)
                                 }
                                 RemoveMagazineCargo(const_cast<Magazine*>(magazine.GetRef()));
                                 GetNetworkManager().RemoveMagazineCargo(parent, magazine->_creator, magazine->_id);
+                                ArsenalCharge(veh, false);
                                 DoVerify(man->AddMagazine(const_cast<Magazine*>(magazine.GetRef())) >= 0);
                             }
                             else
@@ -693,13 +721,14 @@ void ResourceSupply::Simulate(float deltaT, SimulationImportance prec)
                 // the existing path below. Do not remove cargo until accepted.
                 if (GWorld->GetMode() != GModeNetware && target == GWorld->PlayerOn() && FindWeapon(weapon))
                 {
-                    if (!InventoryCanCarryWeapon(target, weapon) ||
+                    if (!InventoryCanCarryWeapon(target, weapon) || !ArsenalCan(veh, true, target) ||
                         target->AddWeapon(weapon, true, true, false) < 0)
                     {
                         _supplying = nullptr;
                         return;
                     }
                     RemoveWeaponCargo(weapon);
+                    ArsenalCharge(veh, true);
                     target->OnWeaponChanged();
                     if (GWorld->FocusOn() && GWorld->FocusOn()->GetVehicle() == target)
                         GWorld->UI()->ResetVehicle(target);
@@ -712,6 +741,11 @@ void ResourceSupply::Simulate(float deltaT, SimulationImportance prec)
                 AUTO_STATIC_ARRAY(Ref<const WeaponType>, conflict, 16);
                 if (FindWeapon(weapon) && target->CheckWeapon(weapon, conflict))
                 {
+                    if (!ArsenalCan(veh, true, target))
+                    {
+                        _supplying = nullptr;
+                        return;
+                    }
                     AUTO_STATIC_ARRAY(MagazineInWeapon, miwConflict, 16);
                     for (int i = 0; i < conflict.Size(); i++)
                     {
@@ -744,6 +778,7 @@ void ResourceSupply::Simulate(float deltaT, SimulationImportance prec)
                     }
                     RemoveWeaponCargo(weapon);
                     GetNetworkManager().RemoveWeaponCargo(parent, weapon->GetName());
+                    ArsenalCharge(veh, true);
                     DoVerify(target->AddWeapon(weapon, false, false, false) >= 0);
                     if (GWorld->FocusOn() && GWorld->FocusOn()->GetVehicle() == target)
                     {
@@ -791,12 +826,14 @@ void ResourceSupply::Simulate(float deltaT, SimulationImportance prec)
                                 }
                                 // add magazine
                                 AUTO_STATIC_ARRAY(Ref<const Magazine>, conflict, 16);
-                                if (!target->CheckMagazine(magazine, conflict) || conflict.Size() > 0)
+                                if (!target->CheckMagazine(magazine, conflict) || conflict.Size() > 0 ||
+                                    !ArsenalCan(veh, false, nullptr))
                                 {
                                     goto EnoughMagazines;
                                 }
                                 RemoveMagazineCargo(magazine);
                                 GetNetworkManager().RemoveMagazineCargo(parent, magazine->_creator, magazine->_id);
+                                ArsenalCharge(veh, false);
                                 DoVerify(target->AddMagazine(magazine) >= 0);
                             }
                         }
@@ -841,13 +878,14 @@ void ResourceSupply::Simulate(float deltaT, SimulationImportance prec)
                 }
                 if (GWorld->GetMode() != GModeNetware && target == GWorld->PlayerOn())
                 {
-                    if (!InventoryCanCarryMagazine(target, magazine) ||
+                    if (!InventoryCanCarryMagazine(target, magazine) || !ArsenalCan(veh, false, target) ||
                         target->AddMagazine(const_cast<Magazine*>(magazine.GetRef()), true, true) < 0)
                     {
                         _supplying = nullptr;
                         return;
                     }
                     RemoveMagazineCargo(const_cast<Magazine*>(magazine.GetRef()));
+                    ArsenalCharge(veh, false);
                     _supplying = nullptr;
                     if (target == GWorld->CameraOn())
                         CutScene("TakeMagazine");
@@ -857,6 +895,11 @@ void ResourceSupply::Simulate(float deltaT, SimulationImportance prec)
                 AUTO_STATIC_ARRAY(Ref<const Magazine>, conflict, 16);
                 if (target->CheckMagazine(magazine, conflict))
                 {
+                    if (!ArsenalCan(veh, false, target))
+                    {
+                        _supplying = nullptr;
+                        return;
+                    }
                     for (int i = 0; i < conflict.Size(); i++)
                     {
                         const Magazine* m = conflict[i];
@@ -869,6 +912,7 @@ void ResourceSupply::Simulate(float deltaT, SimulationImportance prec)
                     }
                     RemoveMagazineCargo(const_cast<Magazine*>(magazine.GetRef()));
                     GetNetworkManager().RemoveMagazineCargo(parent, magazine->_creator, magazine->_id);
+                    ArsenalCharge(veh, false);
                     Verify(target->AddMagazine(const_cast<Magazine*>(magazine.GetRef()), false, true) >= 0);
                 }
                 _supplying = nullptr; // done

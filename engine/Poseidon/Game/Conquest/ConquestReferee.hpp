@@ -102,11 +102,13 @@ struct LiveGroup
     int objective = -1;
     bool locked = false; // under the human commander's orders
     bool stalled = false;
-    float destX = 0.0f, destY = 0.0f; // where it was last sent
+    float destX = 0.0f, destY = 0.0f; // where it is going
+    bool hasDest = false;              // ... known: it has somewhere to go (not standing, awaiting orders)
     std::string typeName;             // "Motorised squad"
     std::string role;                 // foot, motorised, mechanised, air
     int size = 0;                     // soldiers at full strength
     bool playerLed = false;           // the player is inside one of its soldiers
+    std::string doing;                // what it is doing, in words: "Supply run to Figari (300)", "Taking Tyrone"
 };
 /// Every Conquest squad, live (positions read through `group`).
 void ForEachGroup(const std::function<void(const LiveGroup&)>& fn);
@@ -121,6 +123,42 @@ struct SquadInfo
     float cost = 0.0f;
     int size = 0;
 };
+/// The commander's contextual orders for selected squads (the command bar's buttons).
+enum class SquadCommand
+{
+    Engage,   // fire at will, combat stance
+    HoldFire, // fire only when fired upon
+    Stop,     // stand where they are, awaiting orders
+    Board,    // get into the squad's own vehicles
+    GetOut,   // out of the vehicles (a helicopter lands for its passengers; crews of tanks stay)
+    Land,     // a helicopter sets down and waits
+    ToBase,   // back to the nearest objective the side holds
+    SupplyRuns, // a squad with a truck of its own carries supplies from the HQ to the bases
+    Fight,      // ... and back to fighting
+};
+/// What the selection can be told: the bar shows only the commands that apply.
+struct SelectionInfo
+{
+    bool any = false;
+    bool vehicles = false;  // a squad with vehicles of its own
+    bool aboard = false;    // someone sits in one as a passenger or driver who could get out
+    bool onFoot = false;    // someone with a vehicle to board is on foot
+    bool helicopter = false;
+    bool airborne = false;  // a helicopter of theirs is in the air
+    bool canSupply = false; // a fighting squad with a truck of its own: it could run supplies
+    bool onSupply = false;  // a squad on supply duty (not a supply truck squad: those always are)
+};
+/// Send a supply truck of the player's side to base `base` (the one at the HQ first, else the nearest).
+/// Returns its callsign, or "" with the reason.
+std::string SendSupplyTo(int base, std::string* reason = nullptr);
+SelectionInfo DescribeSelection(const std::vector<int>& ids);
+/// Give the selected squads that order; returns how many took it.
+int CommandSquads(const std::vector<int>& ids, SquadCommand command);
+const char* SquadCommandName(SquadCommand command);
+/// Engage a target: the building or vehicle nearest (x, y) (within 30 m) becomes the selected squads'
+/// target, and they attack it (a gunship flies in on it). Returns what was targeted, "" when nothing is there.
+std::string EngageAt(const std::vector<int>& ids, float x, float y);
+
 /// What the player's side can buy, index = squad type.
 std::vector<SquadInfo> SquadTypes();
 /// A squad type by its config class name or display name, -1 if none.
@@ -184,7 +222,15 @@ struct Options
     bool resistance = false;       // a war with a third side: it takes part (off: its base is a neutral village)
     std::array<float, MaxSides> startPool{500.0f, 500.0f, 500.0f}; // each side's supplies when the war begins
     int victoryTowns = 0;          // a side holding this many villages (HQs not counted) wins; 0: off
+    int timeLimit = 0;             // minutes of war; then the higher war score wins. 0: off
+    bool resistanceAlly = false;   // the Resistance fights with WEST (with resistance on)
+    bool enemyMarkers = false;     // the enemy the side knows of, as symbols in the command view and its minimap
 };
+
+/// No mortars or air strikes this long into the war (CfgConquest supportDelay; conquestStart may set it).
+void SetSupportDelay(float seconds);
+/// Seconds of war left under the time limit, or -1 when there is none.
+float TimeLeft();
 
 // ---- who commands (multiplayer: one human commander per side, removable by a vote) ----
 

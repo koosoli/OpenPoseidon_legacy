@@ -117,7 +117,7 @@ Invoke-Run 'A-soldier' {
 }
 
 Invoke-Run 'B-commander' {
-    Check ((Eval 'conquestStart ["EAST", "commander", "contacts", "", [], false, 0, [500, 1500]]') -eq 'true') 'B: the war starts in command'
+    Check ((Eval 'conquestStart ["EAST", "commander", "contacts", "", [], false, 0, [500, 1500], 0, false, 0]') -eq 'true') 'B: the war starts in command'
     Start-Sleep -Seconds 8
     Check ((LogCount 'commander view on') -ge 1) 'B: the command view opened at the start'
     $null = Eval 'conquestCamera [4772, 10700, 700, 55, 180]'
@@ -139,16 +139,16 @@ Invoke-Run 'B-commander' {
     Start-Sleep -Seconds 4
     Shot 'barrage-2'
     Check ((Eval 'conquestBarrage [4700, 10450]') -match 'reloading') 'B: the mortars reload after a barrage'
-    # Follow an EAST squad leader (each side starts with five squads: WEST 1-5, EAST 6-10), then all the way down.
-    Check ((Eval 'conquestCamera [7, 25, 30]') -eq 'true') 'B: following squad 7'
+    # Follow an EAST squad leader (each side starts with seven squads: WEST 1-7, EAST 8-14), then all the way down.
+    Check ((Eval 'conquestCamera [8, 25, 30]') -eq 'true') 'B: following squad 8'
     Start-Sleep -Seconds 3
     Shot 'follow-25m'
-    $null = Eval 'conquestCamera [7, 3, 3]'
+    $null = Eval 'conquestCamera [8, 3, 3]'
     Start-Sleep -Seconds 3
     Shot 'follow-ground-level'
     # Into a soldier, killed: back in command.
-    $took = Eval 'conquestTakeControl 7'
-    Check ($took -eq 'true') "B: took control of squad 7 ($took)"
+    $took = Eval 'conquestTakeControl 8'
+    Check ($took -eq 'true') "B: took control of squad 8 ($took)"
     Start-Sleep -Seconds 3
     $null = Eval 'player setDammage 1'
     Start-Sleep -Seconds 5
@@ -168,7 +168,7 @@ Invoke-Run 'B-commander' {
 
 Invoke-Run 'C-barrage' {
     # Mortars watched with the default fog of war, on open ground west of the airfield's runway.
-    Check ((Eval 'conquestStart ["EAST", "commander", "contacts", "", [], false, 0, [500, 1500]]') -eq 'true') 'C: the war starts in command'
+    Check ((Eval 'conquestStart ["EAST", "commander", "contacts", "", [], false, 0, [500, 1500], 0, false, 0]') -eq 'true') 'C: the war starts in command'
     Start-Sleep -Seconds 6
     $null = Eval 'conquestCamera [4600, 10650, 260, 38, 90]'
     Check ((Eval 'conquestBarrage [4600, 10650]') -eq 'true') 'C: the barrage was ordered'
@@ -188,6 +188,33 @@ Invoke-Run 'C-barrage' {
         Start-Sleep -Milliseconds 700
         Shot "bombs-$t"
     }
+    # The command bar's orders. EAST's squads: 8 motorised, 9 rifle, 10 recon, 11 and 12 tanks, 13 air assault, 14 supply truck.
+    Check ((Eval 'conquestSquad [[8, 9], "engage"]') -eq '2') 'C: two squads told to engage'
+    Check ((Eval 'conquestSquad [[9], "stop"]') -eq '1') 'C: a squad told to stop'
+    Check ((Eval 'conquestSquad [[8], "board"]') -eq '1') 'C: a squad told to board its truck'
+    # Engage with a target: the tanks (11) on a building in Tyrone.
+    $what = Eval 'conquestEngage [[11], 4946, 9056]'
+    Check ($what -ne '') "C: the tanks engage a building in Tyrone ($what)"
+    # The helicopter squad to Tyrone (1.9 km): it must land to unload, not hover over the drop.
+    Check ((Eval 'conquestOrder [[13], 4946, 9056]') -eq '1') 'C: the air assault squad sent to Tyrone'
+    $deadline = [DateTime]::UtcNow.AddSeconds(150)
+    $landed = $false
+    while (!$landed -and [DateTime]::UtcNow -lt $deadline) {
+        Start-Sleep -Seconds 5
+        # the Mi-17 near Tyrone: on the ground (under 2 m) with only its pilot left aboard
+        $state = Eval '_h = [4946, 9056] nearObjects ["Mi17", 600]; if (count _h == 0) then {"none"} else {format ["%1 %2", (getPos (_h select 0)) select 2, count crew (_h select 0)]}'
+        if ($state -match '^([\d.]+) (\d+)$' -and [double]$Matches[1] -lt 2.0 -and [int]$Matches[2] -le 1) { $landed = $true }
+    }
+    Shot 'helicopter-unloaded'
+    Check $landed "C: the helicopter landed and unloaded at Tyrone ($state)"
+}
+
+Invoke-Run 'F-support-delay' {
+    # Support waits for the war's first five minutes (the default supportDelay).
+    Check ((Eval 'conquestStart ["EAST", "commander", "contacts", "", [], false, 0, [2000, 2000]]') -eq 'true') 'F: the war starts'
+    Start-Sleep -Seconds 6
+    Check ((Eval 'conquestBarrage [4700, 10450]') -match 'support is ready') 'F: no mortars at the start'
+    Check ((Eval 'conquestAirStrike [4700, 10450]') -match 'support is ready') 'F: no air strike at the start'
 }
 
 Invoke-Run 'D-resistance' {

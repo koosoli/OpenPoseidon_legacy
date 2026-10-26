@@ -26,6 +26,7 @@ struct Advice
     std::string buy;                                       // a squad type the side should buy next, or ""
     std::string barrage;                                   // an objective whose known enemies the mortars should shell, or ""
     std::string reason;                                    // one sentence, for the war log and HQ
+    std::string radio;                                     // the situation report HQ radios to the side's soldiers
 };
 
 /// The commander's instructions and the JSON it must answer with.
@@ -49,6 +50,7 @@ struct Answer
     Advice advice;
     std::string error;
     double seconds = 0.0; // how long the model took
+    std::string note;     // the configured model could not chat; the provider's default answered instead
 };
 /// The finished answer for `side`, once (game thread).
 bool TakeAnswer(int side, Answer& answer);

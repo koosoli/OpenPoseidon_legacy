@@ -124,7 +124,8 @@ struct Settings
     bool logTraffic = false;    // write every request/response to TrafficLogPath() (keys hidden)
 
     int chatKey = 73; // SDL_SCANCODE_INSERT: open the text box
-    int talkKey = 57; // SDL_SCANCODE_CAPSLOCK: hold to talk (the game's own voice-chat key; NPC chat is single-player only)
+    int talkKey = 24; // SDL_SCANCODE_U: hold to talk. Not Caps Lock: that is the game's own voice-over-net key
+                      // (VoiceOverNetPushToTalk), and U is bound to nothing in play.
 
     int maxRequestsPerMinute = 12; // protects the player's API bill from a runaway loop
     int requestTimeoutSeconds = 90; // free models are often queued, and thinking models think first

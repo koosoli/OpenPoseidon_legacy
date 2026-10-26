@@ -668,8 +668,11 @@ bool ParseModelList(LlmProvider provider, const std::string& body, std::vector<M
 bool IsChatModelId(const std::string& id)
 {
     const std::string l = LowerAscii(id);
+    // "-live" / "native-audio" / "realtime": streaming voice models, reachable only over a WebSocket
+    // (Gemini's bidiGenerateContent): a chat request to one is refused (HTTP 400) every time.
     for (const char* not_chat : {"safety", "guard", "shield", "moderation", "embed", "rerank", "whisper", "tts",
-                                 "transcribe", "image", "imagen", "dall-e", "veo", "lyria"})
+                                 "transcribe", "image", "imagen", "dall-e", "veo", "lyria", "-live", "live-",
+                                 "native-audio", "realtime", "audio-preview"})
         if (l.find(not_chat) != std::string::npos)
             return false;
     return true;
