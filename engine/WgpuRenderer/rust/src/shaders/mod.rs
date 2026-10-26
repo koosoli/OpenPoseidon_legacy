@@ -83,9 +83,8 @@ pub(crate) fn shader_defs() -> std::collections::HashMap<String, naga_oil::compo
         defs.insert("CLOUD_MS".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
     }
     // look pack (2026-10-25), off by default until the owner picks it from A/B captures: TW_FOAM2
-    // two-stage whitecaps (water_tw::foam2_enabled switches the FFT side with the same variable),
-    // SEA_HYDRO short waves bunched on crests and downwind faces, SEA_SMEAR froth trailing downwind
-    for (var, def) in [("WGR_TW_FOAM2", "TW_FOAM2"), ("WGR_SEA_HYDRO", "SEA_HYDRO"), ("WGR_SEA_SMEAR", "SEA_SMEAR")] {
+    // two-stage whitecaps (water_tw::foam2_enabled switches the FFT side with the same variable)
+    for (var, def) in [("WGR_TW_FOAM2", "TW_FOAM2")] {
         if std::env::var(var).as_deref() == Ok("1") {
             defs.insert(def.to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
         }
@@ -93,7 +92,9 @@ pub(crate) fn shader_defs() -> std::collections::HashMap<String, naga_oil::compo
     // signed off by the owner in game (2026-10-26), so on unless set to 0: CLOUD_DECK two-stream
     // light in thick cloud, SEA_SPECAA specular anti-aliasing of the sea's sun lobe, SEA_GLINTS the
     // sun's glitter on the sea (switched off at run time by the Water tab's "TW sun glitter")
-    for (var, def) in [("WGR_CLOUD_DECK", "CLOUD_DECK"), ("WGR_SEA_SPECAA", "SEA_SPECAA"), ("WGR_SEA_GLINTS", "SEA_GLINTS")] {
+    // SEA_HYDRO short waves bunched on crests and downwind faces, SEA_SMEAR froth trailing downwind
+    // (both 2026-10-26; the Water tab's switches turn each off at run time)
+    for (var, def) in [("WGR_CLOUD_DECK", "CLOUD_DECK"), ("WGR_SEA_SPECAA", "SEA_SPECAA"), ("WGR_SEA_GLINTS", "SEA_GLINTS"), ("WGR_SEA_HYDRO", "SEA_HYDRO"), ("WGR_SEA_SMEAR", "SEA_SMEAR")] {
         if std::env::var(var).as_deref() != Ok("0") {
             defs.insert(def.to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
         }

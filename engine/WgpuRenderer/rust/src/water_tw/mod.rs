@@ -319,7 +319,7 @@ struct TwSurface {
     // (OP) blood in the water: per stain x, z, age, amount (impacts.rs blood_lanes, tw_impact.wgsl)
     blood: [[f32; 4]; impacts::BLOOD_SLOTS],
     // (OP) x: sun glitter on (SEA-GLINTS; the Water tab's switch rides in WgrWaterParams::water_backend_pad[0],
-    // bit 0 = off, so a zero-filled producer keeps the default), y: SEA-HYDRO on (bit 1), z: SEA-SMEAR on (bit 2)
+    // bit 0 = off, so a zero-filled producer keeps the default), y: SEA-HYDRO (bit 1 = off), z: SEA-SMEAR (bit 2 = off)
     look: [f32; 4],
 }
 
@@ -498,8 +498,8 @@ fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
         blood: f.blood,
         look: [
             if p.water_backend_pad[0] & 1 != 0 { 0.0 } else { 1.0 },
-            if p.water_backend_pad[0] & 2 != 0 { 1.0 } else { 0.0 },
-            if p.water_backend_pad[0] & 4 != 0 { 1.0 } else { 0.0 },
+            if p.water_backend_pad[0] & 2 != 0 { 0.0 } else { 1.0 },
+            if p.water_backend_pad[0] & 4 != 0 { 0.0 } else { 1.0 },
             0.0,
         ],
     }

@@ -6941,9 +6941,9 @@ void DrawWaterTab()
                           "along the glitter path and round it. On by default.");
         changed |= Dev::Checkbox("TW crest bunching", &t.seaHydro);
         Dev::PanelTooltip("Short ripples bunched on the wave crests and downwind faces, glassy troughs "
-                          "(open-water's hydrodynamic modulation). Compiled in only with WGR_SEA_HYDRO=1.");
+                          "(open-water's hydrodynamic modulation). On by default; WGR_SEA_HYDRO=0 compiles it out.");
         changed |= Dev::Checkbox("TW froth smear", &t.seaSmear);
-        Dev::PanelTooltip("Whitecaps trail their froth downwind (open-water). Compiled in only with WGR_SEA_SMEAR=1.");
+        Dev::PanelTooltip("Whitecaps trail their froth downwind (open-water). On by default; WGR_SEA_SMEAR=0 compiles it out.");
         changed |= Dev::SliderFloat("TW reflection strength", &t.reflectionStrength, 0.0f, 2.0f, "%.2f");
         changed |= Dev::SliderFloat("TW water glow", &t.waterGlow, 0.0f, 1.0f, "%.2f");
         Dev::PanelTooltip("Light scattered inside the water toward the eye (W3j). 0 = the surface's reflection "
@@ -7722,37 +7722,6 @@ void DrawMouseTab()
         Defer([] { InputSubsystem::Instance().SaveKeys(); });
     if (Dev::PanelItemHovered())
         ImGui::SetTooltip("Persist sensitivity + tuning to mouse.cfg (also written for old builds).");
-}
-
-// Temporary owner smoke test (POSEIDON_SMOKE_WATER=1): the dev panel key opens only these switches.
-bool SmokeWaterWindow()
-{
-    static const bool on = [] {
-        const char* v = std::getenv("POSEIDON_SMOKE_WATER");
-        return v != nullptr && v[0] == '1';
-    }();
-    return on;
-}
-
-void DrawSmokeWaterWindow()
-{
-    ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(340, 150), ImGuiCond_FirstUseEver);
-    ImGui::Begin("Water smoke test");
-    if (GEngine == nullptr || !GEngine->SupportsWater())
-    {
-        ImGui::TextUnformatted("water not up yet");
-        ImGui::End();
-        return;
-    }
-    auto s = GEngine->GetWaterSettings();
-    bool changed = false;
-    changed |= ImGui::Checkbox("Crest bunching", &s.tidewater.seaHydro);
-    changed |= ImGui::Checkbox("Froth smear", &s.tidewater.seaSmear);
-    if (changed)
-        GEngine->SetWaterSettings(s);
-    ImGui::TextDisabled("Ctrl+F8 hides this and gives the mouse back.");
-    ImGui::End();
 }
 
 void DrawMainWindow()
@@ -8636,9 +8605,7 @@ void NewFrame()
     // POSEIDON_PANEL_SEARCH opens the panel as well as seeding the filter, so a
     // filtered tab can be captured by --auto-screenshot. An auto-capture has no
     // hands: without this the search could only ever be checked by a person.
-    if (s_visible && SmokeWaterWindow())
-        DrawSmokeWaterWindow();
-    else if (s_visible || Dev::PanelSearchPreseeded())
+    if (s_visible || Dev::PanelSearchPreseeded())
         DrawMainWindow();
     Poseidon::NpcChat::DrawOverlay(s_visible);
 }
