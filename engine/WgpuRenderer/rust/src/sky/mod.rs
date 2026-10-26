@@ -3258,7 +3258,17 @@ impl Sky {
                 if let Some(prev) = target.prev_ivp {
                     let moved = (0..3).map(|i| (cur_cam[i] - target.prev_cam[i]).powi(2)).sum::<f32>();
                     let inv = glam::DMat4::from_cols_array_2d(&prev.map(|c| c.map(f64::from))).inverse();
-                    if moved < 400.0 && inv.is_finite() {
+                    // (2026-10-26) nor while the view turns fast. The history at a direction that
+                    // was behind a tree or a hill last frame holds no cloud (its march stopped at
+                    // the tree), and a fast turn uncovers it as sky: blue 2x2 blocks trailing
+                    // behind everything in front of an overcast (owner's screenshot). Over ~0.4 deg
+                    // a frame (24 deg/s at 60 fps) every pixel is marched.
+                    let centre = |m: &[[f32; 4]; 4]| {
+                        let v = glam::Mat4::from_cols_array_2d(m) * glam::Vec4::new(0.0, 0.0, 0.5, 1.0);
+                        (v.truncate() / v.w).normalize_or_zero()
+                    };
+                    let turned = centre(&prev).dot(centre(&cur_ivp)) < 0.999976;
+                    if moved < 400.0 && inv.is_finite() && !turned {
                         prev_vp = inv.as_mat4().to_cols_array_2d();
                         params[0] = 1.0;
                     }
