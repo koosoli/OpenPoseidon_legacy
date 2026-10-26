@@ -95,6 +95,8 @@ try {
         if ($p.HasExited -or [DateTime]::UtcNow -gt $deadline) { throw 'Conquest never became active' }
         Start-Sleep -Seconds 2
     }
+    # The mission opens on its setup screen: start the war as WEST, leading a squad.
+    $null = Eval 'conquestStart ["WEST", "soldier"]'
     # A mission may start the player as a squad leader (startAs = "soldier"). Picture the soldier's
     # HUD, then hand the squad back to the AI: the soak watches an NPC-only war.
     Start-Sleep -Seconds 4

@@ -545,3 +545,54 @@ At the owner's request (2026-10-25/26), ahead of the slice order:
 - **Engine fix found on the way:** a load read a mission's `description.ext` and stringtable from `missions/` whatever
   folder the mission was in (`World::Serialize` called `SetMission` before restoring the subdirectory). Any save of
   a content-pack or `--test-mission` mission loaded without its description.ext.
+
+## Status, 2026-10-26 (later): the owner's play-test list
+
+From the owner's first hand-played session:
+
+- **Death never ends the war while the side has soldiers.** Man::Killed ran the game's own death camera
+  (`scripts\onPlayerKilled.sqs`) before the World's end check that Conquest had hooked, so the player saw the
+  game-over sequence. `Conquest::OnRealPlayerDead` is now asked there first: with the commander view, a possessed
+  soldier's death returns the player to command; otherwise the player carries on in the next soldier of their
+  squad, else the nearest squad. Only a side with nobody left ends the mission.
+- **A setup screen** (`setup = 1`): side (BLUFOR / OPFOR), start as a squad leader or in command, and the options:
+  commander view on/off, fog of war, taking control of soldiers, HQ radio. During the war the commander view's
+  **Options** button changes the last three. Scripts start the war with `conquestStart [side, start, fog, "noview"]`.
+- **Fog of war is always on**, in one of two modes: *Contacts* (the default: enemies only as the side's target
+  database knows them) or *Shroud* (also: 100 m cells no friendly soldier has been within 350 m of stay black in
+  the commander view, with soft edges). The enemy's 3D models are still drawn: `hideObject` is a stub in this engine,
+  so hiding them needs renderer work.
+- **HQ radio:** while the player does not command, the AI commander's orders go out on the side channel ("Bravo and
+  Delta, attack Figari."), captures and losses are announced, and the player's own squad gets an order of its own,
+  shown on the soldier's HUD with bearing and distance.
+- **Command posts:** every objective gets a tent (`postClass`, default `Camp`) on free ground near its centre, with
+  the owner's flag beside it (`usa_vlajka.pac` / `rus_vlajka.pac`). Only soldiers within `captureRadius` (30 m)
+  of the post count; squads are sent inside that circle. The town radius still governs spawning and threat.
+- **Commander view:** zoom from 3 m to 3.5 km and tilt from 2° (ground level) to 88° (R/F or the middle mouse
+  button); Ctrl + left drag moves the view; clicking a soldier selects him (and his squad), the camera follows him,
+  the wheel closes in without entering him (vehicles: outside their bounding sphere), and "Take control" becomes
+  that soldier (T). Squads have their own shade of the side's colour (blues, reds, greens), and units carry small
+  APP-6-style symbols above them: friendly rectangles, hostile diamonds, infantry, motorised, armour, mechanised,
+  rotary wing.
+- **Mortars:** SUPPORT in the deploy panel: 8 rounds of 120 mm on a clicked point, 60 supplies, 120 s to reload
+  (`barrage*` in CfgConquest; `conquestBarrage [x, y]`).
+- **Tanks and gunships:** `Armour` (M60 / T72) and `Gunship` (Cobra / Mi-24) squads; their crews stay mounted. The
+  AI commander makes every fourth purchase heavy and saves up for it unless short of men.
+- Checked by `scripts/Test-ConquestFeatures.ps1` (three runs: soldier deaths, command with shroud, the barrage),
+  all checks pass; captures in `build/conquest-runs/features-*`.
+
+### AI cost at 80 / 160 / 240 soldiers (2026-10-26)
+
+`scripts/Measure-ConquestAiCost.ps1` (build at 4604f6a7a, dist, 1280x720, quality preset 1, no frame cap): the cap is
+raised to half the total per side with endless supplies, and 12 frame-profiler samples are taken once the war holds
+85 % of the total.
+
+| Target alive | Mean alive | sim:step avg / p95 ms | frame avg / p95 ms | referee tick ms |
+|---:|---:|---:|---:|---:|
+| 80 | 72 | 0.46 / 1.55 | 6.4 / 11.9 | 0.14 |
+| 160 | 151 | 1.03 / 2.53 | 12.2 / 14.5 | 2.66 |
+| 240 | 156 (did not fill) | 4.23 / 13.07 | 14.5 / 26.4 | 1.29 |
+
+The simulation stage stays far inside a 60 fps frame at 150 soldiers. The 240 run never got past 156 alive within
+8 minutes (the AI buys one squad per plan and losses keep pace), so the 240 point is still open: it needs a faster
+fill (a scripted spawn) rather than the war's own purchasing.

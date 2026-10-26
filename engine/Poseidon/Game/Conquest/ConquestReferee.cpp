@@ -11,6 +11,7 @@
 #include <Poseidon/Foundation/Modules/Modules.hpp>
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
+#include <Poseidon/Game/Chat.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 #include <Poseidon/Network/NetworkIface.hpp>
@@ -89,6 +90,7 @@ struct SquadDef
     float cost = 80.0f;
     std::string role = "foot"; // foot, motorised, mechanised, air: how the AI commanders choose
     bool aiBuys = true;
+    bool mounted = false; // the crew lives in its vehicle (tanks, gunships): never gets out
     std::array<std::vector<RString>, MaxSides> classes;
     std::array<std::vector<RString>, MaxSides> vehicles; // spawned empty beside the squad, given to it
 };
@@ -103,9 +105,35 @@ struct Config
     std::vector<int> startSquads{0, 0, 0}; // squad types each HQ starts with, free
     float planSeconds = 20.0f;
     bool groupMarkers = true; // every squad on the map with its task (observer / debugging view)
-    bool possession = true;   // the commander may take control of any friendly soldier
-    bool startAsSoldier = false; // startAs = "soldier": the player begins as a squad leader, not in command
+    bool setup = true;        // the mission opens with the side and options screen (setup = 0: config defaults)
+    Options defaults;         // the setup screen's starting choices (startAs, possession, fog ...)
+    std::string postClass = "Camp";        // each objective's command post: what squads must stand by
+    std::string flagClass = "FlagCarrier"; // beside it, flying the owner's flag
+    std::array<std::string, MaxSides> flagTexture;
+    float barrageCost = 150.0f;
+    float barrageCooldown = 120.0f;
+    int barrageShells = 8;
+    float barrageSpread = 35.0f;
+    std::string barrageAmmo = "Shell120";
 };
+
+// An objective's command post: a tent at its capture centre and the owner's flag beside it.
+struct Post
+{
+    OLink<EntityAI> tent;
+    OLink<EntityAI> flag;
+    int flown = -2; // the side whose flag flies (-2: not set yet)
+};
+
+struct PendingShell
+{
+    float at = 0.0f; // game time it comes down
+    float x = 0.0f, y = 0.0f;
+};
+
+// The shroud: which 100 m cells a soldier of the player's side has been near.
+constexpr float ShroudCell = 100.0f;
+constexpr float ShroudReveal = 350.0f;
 
 struct Referee
 {
@@ -128,7 +156,18 @@ struct Referee
     int playerSide = NoSide; // the side the player can command from the map
     bool humanCommander = false; // the player has the commander view open: purchases are theirs
     OLink<Person> commanderBody;  // the player's own body while they are inside a soldier
-    bool reopenView = false;      // the possessed soldier died: the view opens again
+    bool setupPending = false;    // waiting for the setup screen's Start
+    Options options;
+    bool viewRequest = false;     // the commander view should open (start in command, a death)
+    std::string viewNotice;
+    std::string soldierNotice;
+    std::vector<Post> posts;      // per objective
+    std::vector<uint8_t> explored; // the shroud, shroudSize x shroudSize cells
+    int shroudSize = 0;
+    float lastBarrage = -1.0e9f;
+    std::vector<PendingShell> shells;
+    PlayerOrder playerOrder;
+    int playerOrderObjective = -1;
     float lastTick = -1.0f;
     float lastStatus = -1.0e9f;
     std::vector<std::string> markerText; // per objective, what its label marker last said
@@ -164,8 +203,15 @@ struct Saved
     int nextGroupId = 1;
     int playerSide = NoSide;
     OLink<Person> commanderBody;
-    bool possession = true;
+    Options options;
+    bool setupPending = false;
     bool viewOpen = false;
+    std::vector<Post> posts;
+    std::vector<float> postX, postY; // where each command post stands: the capture centre
+    std::string explored;            // the shroud, one '0'/'1' per cell
+    int shroudSize = 0;
+    float lastBarrage = -1.0e9f;
+    int playerOrderObjective = -1;
     float lastTick = -1.0f;
     float lastStatus = -1.0e9f;
     std::deque<std::string> log;
@@ -178,6 +224,9 @@ Saved& Pending()
 }
 
 void ContinueSavedWar(Referee& r, const std::string& mission);
+bool EnterSoldier(Referee& r, Person* person);
+bool HqSpeaks(const Referee& r, int side);
+void Radio(const std::string& text);
 
 // A bar that is neither full for its owner nor an untouched neutral: someone is taking it.
 bool InProgress(const ObjectiveState& s)
@@ -288,8 +337,27 @@ bool LoadConfig(Referee& r, const ParamEntry& cfg)
     r.config.squadCost = Number(cfg, "squadCost", r.config.squadCost);
     r.config.planSeconds = std::max(5.0f, Number(cfg, "planSeconds", r.config.planSeconds));
     r.config.groupMarkers = Number(cfg, "groupMarkers", 1.0f) != 0.0f;
-    r.config.possession = Number(cfg, "possession", 1.0f) != 0.0f;
-    r.config.startAsSoldier = Text(cfg, "startAs", "commander") == "soldier";
+    r.config.setup = Number(cfg, "setup", 1.0f) != 0.0f;
+    r.config.defaults.possession = Number(cfg, "possession", 1.0f) != 0.0f;
+    r.config.defaults.startInCommand = Text(cfg, "startAs", "commander") != "soldier";
+    r.config.defaults.commanderView = Number(cfg, "commanderView", 1.0f) != 0.0f;
+    r.config.defaults.hqRadio = Number(cfg, "hqRadio", 1.0f) != 0.0f;
+    r.config.defaults.fog = Text(cfg, "fog", "contacts") == "shroud" ? FogMode::Shroud : FogMode::Contacts;
+    r.config.postClass = Text(cfg, "postClass", r.config.postClass.c_str());
+    r.config.flagClass = Text(cfg, "flagClass", r.config.flagClass.c_str());
+    r.config.barrageCost = Number(cfg, "barrageCost", r.config.barrageCost);
+    r.config.barrageCooldown = Number(cfg, "barrageCooldown", r.config.barrageCooldown);
+    r.config.barrageShells = static_cast<int>(Number(cfg, "barrageShells", static_cast<float>(r.config.barrageShells)));
+    r.config.barrageSpread = Number(cfg, "barrageSpread", r.config.barrageSpread);
+    r.config.barrageAmmo = Text(cfg, "barrageAmmo", r.config.barrageAmmo.c_str());
+    const float captureRadius = Number(cfg, "captureRadius", 30.0f);
+    for (int s = 0; s < r.war.sideCount; s++)
+    {
+        const TargetSide engine = r.config.engineSide[s];
+        const std::string label = SideLabel(engine);
+        r.config.flagTexture[s] = Text(cfg, (label + "flag").c_str(),
+                                       engine == TWest ? "usa_vlajka.pac" : engine == TEast ? "rus_vlajka.pac" : "");
+    }
     r.tuning.baseCaptureSeconds = Number(cfg, "captureSeconds", r.tuning.baseCaptureSeconds);
     r.tuning.securityRadius = Number(cfg, "securityRadius", r.tuning.securityRadius);
     r.tuning.startScore = Number(cfg, "startScore", r.tuning.startScore);
@@ -309,6 +377,7 @@ bool LoadConfig(Referee& r, const ParamEntry& cfg)
             def.cost = Number(e, "cost", r.config.squadCost);
             def.role = Text(e, "role", "foot");
             def.aiBuys = Number(e, "ai", 1.0f) != 0.0f;
+            def.mounted = Number(e, "mounted", def.role == "armour" || def.role == "gunship" ? 1.0f : 0.0f) != 0.0f;
             for (int s = 0; s < r.war.sideCount; s++)
             {
                 const std::string side = SideLabel(r.config.engineSide[s]);
@@ -378,6 +447,7 @@ bool LoadConfig(Referee& r, const ParamEntry& cfg)
         d.x = static_cast<float>((*pos)[0]);
         d.y = static_cast<float>((*pos)[1]);
         d.radius = Number(o, "radius", d.radius);
+        d.captureRadius = std::min(Number(o, "captureRadius", captureRadius), d.radius);
         d.value = Number(o, "value", d.value);
         KindFromName(Text(o, "kind", "town"), d.kind);
         TargetSide owner;
@@ -409,6 +479,13 @@ bool LoadConfig(Referee& r, const ParamEntry& cfg)
     if (r.war.defs.size() < 2)
         return false;
     StartWar(r.war, r.tuning, r.config.startPool);
+    r.options = r.config.defaults;
+    if (Person* player = GWorld->GetRealPlayer())
+        for (int s = 0; s < r.war.sideCount; s++)
+            if (r.config.engineSide[s] == player->GetTargetSide())
+                r.options.side = s;
+    r.setupPending = r.config.setup;
+    r.posts.assign(r.war.defs.size(), Post());
     r.markerText.assign(r.war.defs.size(), std::string());
     r.markerOwner.assign(r.war.defs.size(), -2);
     LOG_INFO(Mission, "Conquest: {} objectives, {} sides, cap {} per side", r.war.defs.size(), r.war.sideCount,
@@ -468,11 +545,12 @@ Vector3 SpawnPoint(const Referee& r, int side, int o)
     return Ground(d.x - dx * d.radius * 0.6f, d.y - dy * d.radius * 0.6f);
 }
 
-// Where a group goes for its task: a spread of points around the centre so squads do not stack.
+// Where a group goes for its task: a spread of points round the command post, inside its capture
+// circle, so squads do not stack and every one of them counts.
 Vector3 TaskPoint(const ObjectiveDef& d, int groupId)
 {
     const float angle = static_cast<float>(groupId) * 2.39996f; // golden angle
-    const float reach = d.radius * 0.35f;
+    const float reach = d.captureRadius * 0.5f;
     return Ground(d.x + std::cos(angle) * reach, d.y + std::sin(angle) * reach);
 }
 
@@ -580,7 +658,11 @@ int SpawnSquad(Referee& r, int side, int base, bool free, int type = 0)
         }
     }
     if (parked)
+    {
         group->AssignVehicles();
+        if (squad.mounted)
+            group->GetInVehicles(); // a tank crew starts in its tank
+    }
     GroupRecord rec;
     rec.id = r.nextGroupId++;
     rec.side = side;
@@ -754,7 +836,7 @@ void Measure(Referee& r, std::vector<Presence>& presence)
                     const ObjectiveDef& d = r.war.defs[o];
                     const float dx = p.X() - d.x, dy = p.Z() - d.y;
                     const float d2 = dx * dx + dy * dy;
-                    if (d2 <= d.radius * d.radius)
+                    if (d2 <= d.captureRadius * d.captureRadius)
                         presence[o].strength[s] += 1.0f;
                     if (d2 <= security2)
                         near[o][s]++;
@@ -846,8 +928,10 @@ void TrackGroups(Referee& r, float now)
             r.groups.erase(r.groups.begin() + static_cast<std::ptrdiff_t>(i));
             continue;
         }
-        // Mounted squads get out once they are close: a truck is not a place to fight from.
-        if (grp->NVehicles() > 0 && rec.task != TaskKind::None &&
+        // Mounted squads get out once they are close: a truck is not a place to fight from. Tank and
+        // gunship crews fight from their vehicle and stay in it.
+        const bool crew = rec.type >= 0 && rec.type < static_cast<int>(r.config.squads.size()) && r.config.squads[rec.type].mounted;
+        if (!crew && grp->NVehicles() > 0 && rec.task != TaskKind::None &&
             std::hypot(grp->Leader()->Position().X() - rec.destination.X(),
                        grp->Leader()->Position().Z() - rec.destination.Z()) < DismountDistance)
         {
@@ -891,7 +975,7 @@ void TrackGroups(Referee& r, float now)
                 WarLog(Name(rec.side) + " group " + std::to_string(rec.id) + " stalled on the way to " + d.name);
             }
             // The order can be used up (reached, or replaced by combat); give it again if still far.
-            if (!grp->IsAnyPlayerGroup() && dist > d.radius * 0.8f && now - rec.orderedAt > ReorderSeconds && grp->MainSubgroup() &&
+            if (!grp->IsAnyPlayerGroup() && dist > d.captureRadius * 1.2f && now - rec.orderedAt > ReorderSeconds && grp->MainSubgroup() &&
                 !grp->MainSubgroup()->HasCommand())
                 Order(rec, d, now);
         }
@@ -970,6 +1054,28 @@ int ChooseSquadType(const Referee& r, int side, int base)
         return d.aiBuys && !d.classes[side].empty() && pool >= d.cost &&
                r.live[side] + static_cast<int>(d.classes[side].size()) <= r.config.cap;
     };
+    // Every fourth purchase is heavy: a tank platoon or a gunship, alternately. They cost a lot, so
+    // the commander saves up for one unless the side is short of men.
+    if (r.bought[side] % 4 == 3)
+    {
+        const char* heavy[2] = {"armour", "gunship"};
+        const int first = (r.bought[side] / 4) % 2;
+        for (int k = 0; k < 2; k++)
+        {
+            const char* role = heavy[(first + k) % 2];
+            for (size_t t = 0; t < r.config.squads.size(); t++)
+            {
+                const SquadDef& d = r.config.squads[t];
+                if (d.role != role || !d.aiBuys || d.classes[side].empty() ||
+                    r.live[side] + static_cast<int>(d.classes[side].size()) > r.config.cap)
+                    continue;
+                if (pool >= d.cost)
+                    return static_cast<int>(t);
+                if (r.live[side] >= r.config.cap / 3)
+                    return -1; // save up for it
+            }
+        }
+    }
     std::vector<const char*> wanted;
     if (front > 2500.0f)
         wanted = {"air", "motorised", "mechanised"};
@@ -989,6 +1095,7 @@ void Plan(Referee& r, int side, float now)
 {
     const SideView view = BuildView(r, side, now);
     const std::vector<Intent> intents = PlanStandard(view, r.commander);
+    std::map<std::pair<int, int>, std::vector<int>> radioed; // (task, objective) -> squads newly given it
     for (const Intent& intent : intents)
     {
         if (intent.kind == Intent::Kind::BuySquad)
@@ -1016,6 +1123,8 @@ void Plan(Referee& r, int side, float now)
                 continue;
             if (now < rec.lockedUntil || (rec.group && rec.group->IsAnyPlayerGroup()))
                 break; // the human commander's order stands, or the player leads this squad
+            if (rec.task != intent.task || rec.objective != intent.objective)
+                radioed[{static_cast<int>(intent.task), intent.objective}].push_back(rec.id);
             rec.task = intent.task;
             rec.objective = intent.objective;
             rec.stalled = false;
@@ -1030,6 +1139,17 @@ void Plan(Referee& r, int side, float now)
             break;
         }
     }
+    if (HqSpeaks(r, side))
+        for (const auto& [what, ids] : radioed)
+        {
+            if (what.second < 0)
+                continue;
+            std::string who;
+            for (size_t i = 0; i < ids.size(); i++)
+                who += (i == 0 ? "" : i + 1 == ids.size() ? " and " : ", ") + Callsign(ids[i]);
+            const char* verb = static_cast<TaskKind>(what.first) == TaskKind::Defend ? "hold" : "attack";
+            Radio(who + ", " + verb + " " + r.war.defs[what.second].name + ".");
+        }
     r.lastPlan[side] = now;
     r.replan[side] = false;
 }
@@ -1097,30 +1217,227 @@ void Refresh(Referee& r, float now)
     }
 }
 
+// ---- command posts, the shroud, HQ's radio, mortars --------------------------------------
+
+GameValue RunWith(const char* code, const GameValue& o, const GameValue& p, const RString& t = RString())
+{
+    GameState* gs = GWorld->GetGameState();
+    if (!gs)
+        return GameValue();
+    GameVarSpace space;
+    gs->BeginContext(&space);
+    gs->VarSetLocal("_o", o, true, true);
+    gs->VarSetLocal("_p", p, true, true);
+    gs->VarSetLocal("_t", GameValue(t), true, true);
+    const GameValue result = gs->EvaluateMultiple(code);
+    gs->EndContext();
+    return result;
+}
+
+GameValue Position(float x, float y, float z)
+{
+    GameValue pos = GWorld->GetGameState()->CreateGameValue(GameArray);
+    GameArrayType& p = pos;
+    p.Add(GameValue(x));
+    p.Add(GameValue(y));
+    p.Add(GameValue(z));
+    return pos;
+}
+
+void FlyFlag(Referee& r, size_t o)
+{
+    Post& post = r.posts[o];
+    const int owner = r.war.states[o].owner;
+    if (post.flown == owner)
+        return;
+    post.flown = owner;
+    if (EntityAI* flag = post.flag)
+        flag->SetFlagTexture(owner == NoSide ? RString() : RString(r.config.flagTexture[owner].c_str()));
+}
+
+// Each objective gets its command post when the war begins: a tent on free ground near the centre,
+// which becomes the objective's capture centre, and a flag of the owner beside it.
+void PlacePosts(Referee& r)
+{
+    for (size_t o = 0; o < r.war.defs.size(); o++)
+    {
+        ObjectiveDef& d = r.war.defs[o];
+        Post& post = r.posts[o];
+        if (!r.config.postClass.empty())
+            if (EntityAI* tent = CreateVehicleAt(RString(r.config.postClass.c_str()), d.x, d.y))
+            {
+                Vector3 at(d.x, Ground(d.x, d.y).Y(), d.y);
+                if (AIUnit::FindNearestEmpty(at, false, tent))
+                {
+                    RunWith("_o setPos _p", GameValueExt(tent), Position(at.X(), at.Z(), 0.0f));
+                    d.x = at.X();
+                    d.y = at.Z();
+                }
+                post.tent = tent;
+            }
+        if (!r.config.flagClass.empty())
+            post.flag = CreateVehicleAt(RString(r.config.flagClass.c_str()), d.x + 7.0f, d.y + 3.0f);
+        FlyFlag(r, o);
+    }
+}
+
+void UpdateShroud(Referee& r)
+{
+    if (r.playerSide == NoSide || !GLandscape)
+        return;
+    if (r.shroudSize == 0)
+    {
+        const float size = (GLandscape->GetTerrainRange() - 1) * GLandscape->GetTerrainGrid();
+        r.shroudSize = std::max(1, static_cast<int>(std::ceil(size / ShroudCell)));
+        r.explored.assign(static_cast<size_t>(r.shroudSize) * r.shroudSize, 0);
+    }
+    AICenter* center = GWorld->GetCenter(r.config.engineSide[r.playerSide]);
+    if (!center)
+        return;
+    const int reach = static_cast<int>(std::ceil(ShroudReveal / ShroudCell));
+    for (int g = 0; g < center->NGroups(); g++)
+    {
+        AIGroup* grp = center->GetGroup(g);
+        if (!grp)
+            continue;
+        for (int id = 1; id <= MAX_UNITS_PER_GROUP; id++)
+        {
+            AIUnit* unit = grp->UnitWithID(id);
+            if (!Alive(unit))
+                continue;
+            const Vector3 p = unit->Position();
+            const int cx = static_cast<int>(p.X() / ShroudCell), cy = static_cast<int>(p.Z() / ShroudCell);
+            for (int y = cy - reach; y <= cy + reach; y++)
+                for (int x = cx - reach; x <= cx + reach; x++)
+                {
+                    if (x < 0 || y < 0 || x >= r.shroudSize || y >= r.shroudSize)
+                        continue;
+                    const float ex = (static_cast<float>(x) + 0.5f) * ShroudCell - p.X();
+                    const float ey = (static_cast<float>(y) + 0.5f) * ShroudCell - p.Z();
+                    if (ex * ex + ey * ey <= ShroudReveal * ShroudReveal)
+                        r.explored[static_cast<size_t>(y) * r.shroudSize + x] = 1;
+                }
+        }
+    }
+}
+
+// HQ on the side radio: the AI commander's orders, heard while the player does not command.
+bool HqSpeaks(const Referee& r, int side)
+{
+    return side == r.playerSide && r.options.hqRadio && !r.humanCommander;
+}
+
+void Radio(const std::string& text)
+{
+    GChatList.Add(CCSide, RString("HQ"), RString(text.c_str()), false, true);
+}
+
+// The player's own squad gets its orders from HQ too: the nearest objective it may attack, else
+// the nearest of its own to hold. The planner leaves the player's squad alone; this tells them.
+void HqOrdersForPlayer(Referee& r, float now)
+{
+    if (r.playerSide == NoSide || r.humanCommander || !GWorld->GetRealPlayer())
+        return;
+    const Vector3 me = GWorld->GetRealPlayer()->Position();
+    GroupRecord* mine = nullptr;
+    for (GroupRecord& rec : r.groups)
+        if (AIGroup* grp = rec.group; grp && grp->IsAnyPlayerGroup())
+            mine = &rec;
+    if (!mine)
+    {
+        r.playerOrder.valid = false;
+        return;
+    }
+    // Still good: an attack on a place not yet ours, or a hold of a place still ours.
+    if (r.playerOrderObjective >= 0)
+    {
+        const int owner = r.war.states[r.playerOrderObjective].owner;
+        const bool attack = mine->task == TaskKind::Attack;
+        if ((attack && owner != r.playerSide && CanAttack(r.war, r.playerSide, r.playerOrderObjective)) ||
+            (!attack && owner == r.playerSide))
+            return;
+    }
+    int best = -1;
+    float bestDist = 1.0e9f;
+    bool attack = true;
+    for (int pass = 0; pass < 2 && best < 0; pass++)
+        for (size_t o = 0; o < r.war.defs.size(); o++)
+        {
+            const bool ok = pass == 0 ? CanAttack(r.war, r.playerSide, static_cast<int>(o))
+                                      : r.war.states[o].owner == r.playerSide;
+            const float dist = std::hypot(r.war.defs[o].x - me.X(), r.war.defs[o].y - me.Z());
+            if (ok && dist < bestDist)
+            {
+                bestDist = dist;
+                best = static_cast<int>(o);
+                attack = pass == 0;
+            }
+        }
+    if (best < 0)
+        return;
+    const ObjectiveDef& d = r.war.defs[best];
+    mine->task = attack ? TaskKind::Attack : TaskKind::Defend;
+    mine->objective = best;
+    mine->destination = TaskPoint(d, mine->id);
+    mine->orderedAt = now;
+    r.playerOrderObjective = best;
+    r.playerOrder.valid = true;
+    r.playerOrder.text = (attack ? "Take the command post at " : "Hold the command post at ") + d.name;
+    r.playerOrder.x = d.x;
+    r.playerOrder.y = d.y;
+    if (r.options.hqRadio)
+        Radio(Callsign(mine->id) + ", this is HQ. " + r.playerOrder.text + ". Out.");
+    WarLog("HQ to the player's squad " + Callsign(mine->id) + ": " + r.playerOrder.text);
+}
+
+void FireShells(Referee& r, float now)
+{
+    for (size_t i = 0; i < r.shells.size();)
+    {
+        if (r.shells[i].at > now)
+        {
+            i++;
+            continue;
+        }
+        const PendingShell s = r.shells[i];
+        r.shells.erase(r.shells.begin() + static_cast<std::ptrdiff_t>(i));
+        const float z = Ground(s.x, s.y).Y() + 90.0f;
+        RunWith("_s = _t camCreate _p; _s setVelocity [0, 0, -140]", GameValue(), Position(s.x, s.y, z),
+                RString(r.config.barrageAmmo.c_str()));
+    }
+}
+
 void Tick(Referee& r, float dt, float now)
 {
     if (!r.started)
     {
+        if (r.setupPending)
+            return; // the setup screen first: side and options
         r.started = true;
+        r.playerSide = r.options.side;
+        PlacePosts(r);
         for (int s = 0; s < r.war.sideCount; s++)
             for (size_t o = 0; o < r.war.defs.size(); o++)
                 if (r.war.states[o].owner == s && r.war.defs[o].kind == ObjectiveKind::HQ)
                     for (int type : r.config.startSquads)
                         SpawnSquad(r, s, static_cast<int>(o), true, type);
-        if (Person* player = GWorld->GetRealPlayer())
-            for (int s = 0; s < r.war.sideCount; s++)
-                if (r.config.engineSide[s] == player->GetTargetSide())
-                    r.playerSide = s;
-        WarLog("the war begins");
-        // startAs = "soldier": the player leads the first squad of their side. Killed, they are back
-        // in command (OnRealPlayerDead) and take over another squad from there: that is the respawn.
-        if (r.config.startAsSoldier && r.config.possession && r.playerSide != NoSide)
+        WarLog("the war begins: the player is " + Name(r.playerSide) +
+               (r.options.startInCommand && r.options.commanderView ? ", in command" : ", leading a squad"));
+        // As a soldier, the player leads the first squad of their side. Killed, they carry on in
+        // another soldier of their side (OnRealPlayerDead): that is the respawn.
+        if (r.options.startInCommand && r.options.commanderView)
+        {
+            r.humanCommander = true; // the supplies are the player's from the first tick, not after the view opens
+            r.viewRequest = true;
+            r.viewNotice = "You have command. Select squads with the left mouse button, order them with the right.";
+        }
+        else if (r.playerSide != NoSide)
             for (const GroupRecord& rec : r.groups)
                 if (rec.side == r.playerSide)
                 {
-                    std::string why;
-                    if (!Possess(rec.id, &why))
-                        LOG_WARN(Mission, "Conquest: could not start as a soldier: {}", why);
+                    AIGroup* grp = rec.group;
+                    if (!grp || !grp->Leader() || !EnterSoldier(r, grp->Leader()->GetPerson()))
+                        LOG_WARN(Mission, "Conquest: could not start as a soldier of {}", Name(r.playerSide));
                     break;
                 }
         for (int s = 0; s < r.war.sideCount; s++)
@@ -1141,6 +1458,15 @@ void Tick(Referee& r, float dt, float now)
             WarLog(Name(result.side) + " captured " + name);
         else
             WarLog(Name(result.side) + " neutralised " + name + " (was " + Name(before) + ")");
+        if (r.playerSide != NoSide && r.options.hqRadio)
+        {
+            if (result.event == CaptureEvent::Captured)
+                Radio(result.side == r.playerSide ? "All units, we hold " + name + "."
+                                                  : "All units, the enemy has taken " + name + ".");
+            else if (before == r.playerSide)
+                Radio("All units, we have lost " + name + ".");
+        }
+        FlyFlag(r, o);
         for (int s = 0; s < r.war.sideCount; s++)
             r.replan[s] = true;
     }
@@ -1156,6 +1482,9 @@ void Tick(Referee& r, float dt, float now)
         for (int s = 0; s < r.war.sideCount; s++)
             if (!r.war.defeated[s] && (r.replan[s] || now - r.lastPlan[s] >= r.config.planSeconds))
                 Plan(r, s, now);
+    if (!r.ended)
+        HqOrdersForPlayer(r, now);
+    UpdateShroud(r);
     UpdateMarkers(r);
     UpdateGroupMarkers(r);
     if (now - r.lastStatus >= StatusSeconds)
@@ -1199,6 +1528,7 @@ void Simulate()
         r.snapshot.active = false;
         return;
     }
+    FireShells(r, now);
     if (now - r.lastTick < TickSeconds && r.started)
         return;
     const float dt = std::clamp(now - r.lastTick, 0.0f, 5.0f);
@@ -1248,8 +1578,22 @@ LSError SerializeSaved(ParamArchive& ar, Saved& w)
     PARAM_CHECK(ar.Serialize("nextGroupId", w.nextGroupId, 1, 1))
     PARAM_CHECK(ar.Serialize("playerSide", w.playerSide, 1, NoSide))
     PARAM_CHECK(ar.SerializeRef("commanderBody", w.commanderBody, 1))
-    PARAM_CHECK(ar.Serialize("possession", w.possession, 1, true))
+    {
+        int fog = static_cast<int>(w.options.fog);
+        PARAM_CHECK(ar.Serialize("side", w.options.side, 1, 0))
+        PARAM_CHECK(ar.Serialize("startInCommand", w.options.startInCommand, 1, false))
+        PARAM_CHECK(ar.Serialize("commanderView", w.options.commanderView, 1, true))
+        PARAM_CHECK(ar.Serialize("fog", fog, 1, 0))
+        PARAM_CHECK(ar.Serialize("possession", w.options.possession, 1, true))
+        PARAM_CHECK(ar.Serialize("hqRadio", w.options.hqRadio, 1, true))
+        w.options.fog = fog == static_cast<int>(FogMode::Shroud) ? FogMode::Shroud : FogMode::Contacts;
+    }
+    PARAM_CHECK(ar.Serialize("setupPending", w.setupPending, 1, false))
     PARAM_CHECK(ar.Serialize("viewOpen", w.viewOpen, 1, false))
+    PARAM_CHECK(SerializeText(ar, "explored", w.explored))
+    PARAM_CHECK(ar.Serialize("shroudSize", w.shroudSize, 1, 0))
+    PARAM_CHECK(ar.Serialize("lastBarrage", w.lastBarrage, 1, -1.0e9f))
+    PARAM_CHECK(ar.Serialize("playerOrderObjective", w.playerOrderObjective, 1, -1))
     PARAM_CHECK(ar.Serialize("lastTick", w.lastTick, 1, -1.0f))
     PARAM_CHECK(ar.Serialize("lastStatus", w.lastStatus, 1, -1.0e9f))
 
@@ -1285,6 +1629,13 @@ LSError SerializeSaved(ParamArchive& ar, Saved& w)
         PARAM_CHECK(sub.Serialize("contested", s.contested, 1, false))
         PARAM_CHECK(sub.Serialize("capturedAt", s.capturedAt, 1, -1.0e9f))
         PARAM_CHECK(sub.Serialize("lastHitAt", s.lastHitAt, 1, -1.0e9f))
+        w.posts.resize(w.states.size());
+        w.postX.resize(w.states.size(), 0.0f);
+        w.postY.resize(w.states.size(), 0.0f);
+        PARAM_CHECK(sub.SerializeRef("tent", w.posts[o].tent, 1))
+        PARAM_CHECK(sub.SerializeRef("flag", w.posts[o].flag, 1))
+        PARAM_CHECK(sub.Serialize("postX", w.postX[o], 1, 0.0f))
+        PARAM_CHECK(sub.Serialize("postY", w.postY[o], 1, 0.0f))
         ar.CloseSubclass(sub);
     }
 
@@ -1363,7 +1714,27 @@ void Restore(Referee& r, const Saved& w)
     r.nextGroupId = w.nextGroupId;
     r.playerSide = w.playerSide;
     r.commanderBody = w.commanderBody;
-    r.config.possession = w.possession;
+    r.options = w.options;
+    r.setupPending = w.setupPending;
+    r.posts = w.posts;
+    r.posts.resize(r.war.defs.size());
+    for (size_t o = 0; o < r.war.defs.size() && o < w.postX.size(); o++)
+        if (w.postX[o] != 0.0f || w.postY[o] != 0.0f)
+        {
+            r.war.defs[o].x = w.postX[o];
+            r.war.defs[o].y = w.postY[o];
+        }
+    r.shroudSize = w.shroudSize;
+    r.explored.assign(w.explored.begin(), w.explored.end());
+    for (uint8_t& c : r.explored)
+        c = c == '1' ? 1 : 0;
+    if (r.explored.size() != static_cast<size_t>(r.shroudSize) * r.shroudSize)
+    {
+        r.explored.clear();
+        r.shroudSize = 0;
+    }
+    r.lastBarrage = w.lastBarrage;
+    r.playerOrderObjective = -1; // HQ repeats its order for the player's squad
     r.lastTick = w.lastTick;
     r.lastStatus = w.lastStatus;
     r.snapshot.log = w.log;
@@ -1414,7 +1785,19 @@ LSError Serialize(ParamArchive& ar)
         w.nextGroupId = r.nextGroupId;
         w.playerSide = r.playerSide;
         w.commanderBody = r.commanderBody;
-        w.possession = r.config.possession;
+        w.options = r.options;
+        w.setupPending = r.setupPending;
+        w.posts = r.posts;
+        for (const ObjectiveDef& d : r.war.defs)
+        {
+            w.postX.push_back(d.x);
+            w.postY.push_back(d.y);
+        }
+        w.shroudSize = r.shroudSize;
+        for (uint8_t c : r.explored)
+            w.explored.push_back(c ? '1' : '0');
+        w.lastBarrage = r.lastBarrage;
+        w.playerOrderObjective = r.playerOrderObjective;
         w.viewOpen = View::Active();
         w.lastTick = r.lastTick;
         w.lastStatus = r.lastStatus;
@@ -1575,16 +1958,73 @@ void TakeBody(Person* person)
     if (GWorld->UI())
         GWorld->UI()->ResetVehicle(brain->GetVehicle());
 }
+
+bool AliveSoldier(Person* person)
+{
+    return person && person->Brain() && person->Brain()->GetLifeState() == AIUnit::LSAlive;
+}
+
+// The player becomes `person`; their own body (the commander's) waits where it is.
+bool EnterSoldier(Referee& r, Person* person)
+{
+    if (!AliveSoldier(person) || !GWorld)
+        return false;
+    if (!r.commanderBody || GWorld->GetRealPlayer() == r.commanderBody.GetLink())
+        r.commanderBody = GWorld->GetRealPlayer();
+    TakeBody(person);
+    return true;
+}
+
+const GroupRecord* RecordOf(const Referee& r, const AIGroup* grp)
+{
+    for (const GroupRecord& rec : r.groups)
+        if (rec.group.GetLink() == grp)
+            return &rec;
+    return nullptr;
+}
+
+// After the player's soldier died: a living soldier of the player's side to carry on in, first from
+// the dead man's own squad, then the squad nearest to where he fell (its leader first).
+Person* NextSoldier(const Referee& r, Person* dead)
+{
+    AIGroup* own = dead && dead->Brain() ? dead->Brain()->GetGroup() : nullptr;
+    if (own)
+        for (int id = 1; id <= MAX_UNITS_PER_GROUP; id++)
+            if (AIUnit* unit = own->UnitWithID(id); Alive(unit) && unit->GetPerson() != dead)
+                return unit->GetPerson();
+    const Vector3 at = dead ? dead->Position() : VZero;
+    Person* best = nullptr;
+    float bestDist = 1.0e18f;
+    for (const GroupRecord& rec : r.groups)
+    {
+        AIGroup* grp = rec.group;
+        if (rec.side != r.playerSide || !grp || grp == own)
+            continue;
+        for (int id = 1; id <= MAX_UNITS_PER_GROUP; id++)
+        {
+            AIUnit* unit = grp->UnitWithID(id);
+            if (!Alive(unit) || unit->GetPerson() == dead)
+                continue;
+            const float d = (unit->Position() - at).SquareSize() + (unit == grp->Leader() ? 0.0f : 1.0e4f);
+            if (d < bestDist)
+            {
+                bestDist = d;
+                best = unit->GetPerson();
+            }
+        }
+    }
+    return best;
+}
 } // namespace
 
 bool PossessionAllowed()
 {
-    return R().active && R().config.possession;
+    return R().active && R().options.possession;
 }
 
 void SetPossessionAllowed(bool allowed)
 {
-    R().config.possession = allowed;
+    R().options.possession = allowed;
 }
 
 bool Possessing()
@@ -1593,7 +2033,7 @@ bool Possessing()
     return r.active && r.commanderBody && GWorld && GWorld->GetRealPlayer() != r.commanderBody.GetLink();
 }
 
-bool Possess(int groupId, std::string* reason)
+bool PossessUnit(Person* person, std::string* reason)
 {
     Referee& r = R();
     const auto refuse = [&](const char* why)
@@ -1604,30 +2044,37 @@ bool Possess(int groupId, std::string* reason)
     };
     if (!r.active || r.playerSide == NoSide || !GWorld)
         return refuse("no war");
-    if (!r.config.possession)
+    if (!r.options.possession)
         return refuse("taking control of soldiers is switched off");
+    if (!AliveSoldier(person))
+        return refuse("that soldier is down");
+    const GroupRecord* rec = RecordOf(r, person->Brain()->GetGroup());
+    if (!rec || rec->side != r.playerSide)
+        return refuse("not one of your soldiers");
+    EnterSoldier(r, person);
+    WarLog("commander: took control of a soldier of " + Describe(r, *rec));
+    return true;
+}
+
+bool Possess(int groupId, std::string* reason)
+{
+    Referee& r = R();
     for (GroupRecord& rec : r.groups)
     {
         AIGroup* grp = rec.group;
-        if (rec.id != groupId || rec.side != r.playerSide || !grp || !grp->Leader())
-            continue;
-        Person* person = grp->Leader()->GetPerson();
-        if (!person || grp->Leader()->GetLifeState() != AIUnit::LSAlive)
-            return refuse("its leader is down");
-        if (!Possessing())
-            r.commanderBody = GWorld->GetRealPlayer();
-        TakeBody(person);
-        WarLog("commander: took control of " + Describe(r, rec));
-        return true;
+        if (rec.id == groupId && rec.side == r.playerSide && grp && grp->Leader())
+            return PossessUnit(grp->Leader()->GetPerson(), reason);
     }
-    return refuse("no such squad");
+    if (reason)
+        *reason = "no such squad";
+    return false;
 }
 
 bool ReturnToCommander()
 {
     Referee& r = R();
     Person* body = r.commanderBody;
-    if (!body || !body->Brain() || body->Brain()->GetLifeState() != AIUnit::LSAlive)
+    if (!AliveSoldier(body))
         return false;
     if (GWorld->GetRealPlayer() != body)
         TakeBody(body);
@@ -1637,20 +2084,172 @@ bool ReturnToCommander()
 bool OnRealPlayerDead()
 {
     Referee& r = R();
-    if (!r.active || !r.commanderBody || !Possessing())
+    if (!r.active || !r.started || r.playerSide == NoSide || !GWorld)
         return false;
-    if (!ReturnToCommander())
+    Person* dead = GWorld->GetRealPlayer();
+    // With the commander view, the player goes back to command and picks where to go next.
+    if (r.options.commanderView && Possessing() && ReturnToCommander())
+    {
+        WarLog("commander: the soldier you controlled was killed; back in command");
+        r.viewRequest = true;
+        r.viewNotice = "The soldier you controlled was killed. You are back in command.";
+        return true;
+    }
+    // Without it: straight into the next soldier of the side, as long as the side has one.
+    Person* next = NextSoldier(r, dead);
+    if (!next || !EnterSoldier(r, next))
         return false;
-    WarLog("commander: the soldier you controlled was killed; back in command");
-    r.reopenView = true;
+    std::string squad;
+    if (const GroupRecord* rec = RecordOf(r, next->Brain()->GetGroup()))
+        squad = Callsign(rec->id);
+    r.soldierNotice = squad.empty() ? std::string("You were killed. You fight on as another soldier.")
+                                    : "You were killed. You fight on with " + squad + ".";
+    r.playerOrderObjective = -1; // HQ gives the new squad its orders
+    WarLog("the player was killed and carries on in " + (squad.empty() ? std::string("another soldier") : squad));
     return true;
 }
 
-bool TakeReopenViewRequest()
+bool TakeViewRequest(std::string& notice)
 {
-    const bool want = R().reopenView;
-    R().reopenView = false;
-    return want;
+    Referee& r = R();
+    if (!r.viewRequest)
+        return false;
+    r.viewRequest = false;
+    notice = r.viewNotice;
+    return true;
+}
+
+bool TakeSoldierNotice(std::string& notice)
+{
+    Referee& r = R();
+    if (r.soldierNotice.empty())
+        return false;
+    notice = r.soldierNotice;
+    r.soldierNotice.clear();
+    return true;
+}
+
+std::string Callsign(int id)
+{
+    static const char* names[] = {"Alpha",  "Bravo",   "Charlie", "Delta",  "Echo",   "Foxtrot", "Golf",
+                                  "Hotel",  "India",   "Juliet",  "Kilo",   "Lima",   "Mike",    "November",
+                                  "Oscar",  "Papa",    "Quebec",  "Romeo",  "Sierra", "Tango",   "Uniform",
+                                  "Victor", "Whiskey", "X-ray",   "Yankee", "Zulu"};
+    if (id <= 0)
+        return "Squad";
+    const int lap = (id - 1) / 26;
+    const std::string name = names[(id - 1) % 26];
+    return lap > 0 ? name + " " + std::to_string(lap + 1) : name;
+}
+
+bool SetupPending()
+{
+    return R().active && R().setupPending;
+}
+
+std::vector<std::string> SideNames()
+{
+    std::vector<std::string> out;
+    const Referee& r = R();
+    for (int s = 0; s < r.war.sideCount; s++)
+        out.emplace_back(SideLabel(r.config.engineSide[s]));
+    return out;
+}
+
+bool BeginWar(const Options& options)
+{
+    Referee& r = R();
+    if (!r.active || r.started || options.side < 0 || options.side >= r.war.sideCount)
+        return false;
+    r.options = options;
+    r.setupPending = false;
+    return true;
+}
+
+Options GetOptions()
+{
+    return R().options;
+}
+
+void SetOptions(const Options& options)
+{
+    Referee& r = R();
+    const int side = r.options.side;
+    const bool start = r.options.startInCommand;
+    r.options = options;
+    if (r.started)
+    {
+        r.options.side = side;
+        r.options.startInCommand = start;
+    }
+}
+
+bool Explored(float x, float y)
+{
+    const Referee& r = R();
+    if (r.shroudSize == 0)
+        return false;
+    const int cx = static_cast<int>(std::floor(x / ShroudCell)), cy = static_cast<int>(std::floor(y / ShroudCell));
+    if (cx < 0 || cy < 0 || cx >= r.shroudSize || cy >= r.shroudSize)
+        return false;
+    return r.explored[static_cast<size_t>(cy) * r.shroudSize + cx] != 0;
+}
+
+BarrageInfo Barrage()
+{
+    const Referee& r = R();
+    BarrageInfo b;
+    b.cost = r.config.barrageCost;
+    b.shells = r.config.barrageShells;
+    b.cooldownLeft = std::max(0.0f, r.lastBarrage + r.config.barrageCooldown - Now());
+    return b;
+}
+
+bool OrderBarrage(float x, float y, std::string* reason)
+{
+    Referee& r = R();
+    const auto refuse = [&](const char* why)
+    {
+        if (reason)
+            *reason = why;
+        return false;
+    };
+    if (!r.active || !r.started || r.playerSide == NoSide)
+        return refuse("no war");
+    if (r.config.barrageShells <= 0 || r.config.barrageAmmo.empty())
+        return refuse("this war has no mortars");
+    const float now = Now();
+    if (now < r.lastBarrage + r.config.barrageCooldown)
+        return refuse("the mortars are reloading");
+    if (r.war.pool[r.playerSide] < r.config.barrageCost)
+        return refuse("not enough supplies");
+    r.war.pool[r.playerSide] -= r.config.barrageCost;
+    r.lastBarrage = now;
+    // The first round lands after the flight time, the rest a second or so apart, scattered.
+    unsigned seed = static_cast<unsigned>(now * 1000.0f) ^ 0x9E3779B9u;
+    const auto random = [&]()
+    {
+        seed = seed * 1664525u + 1013904223u;
+        return static_cast<float>(seed >> 8) / static_cast<float>(1u << 24);
+    };
+    for (int i = 0; i < r.config.barrageShells; i++)
+    {
+        const float a = random() * 6.2831853f, d = std::sqrt(random()) * r.config.barrageSpread;
+        r.shells.push_back({now + 7.0f + static_cast<float>(i) * 1.1f + random() * 0.6f, x + std::cos(a) * d,
+                            y + std::sin(a) * d});
+    }
+    char where[64];
+    std::snprintf(where, sizeof(where), "%.0f, %.0f", x, y);
+    WarLog(Name(r.playerSide) + " mortar barrage on " + where);
+    if (r.options.hqRadio)
+        Radio("Mortars firing, " + std::to_string(r.config.barrageShells) + " rounds. Splash in seven seconds.");
+    return true;
+}
+
+PlayerOrder CurrentPlayerOrder()
+{
+    const Referee& r = R();
+    return r.active && !r.humanCommander ? r.playerOrder : PlayerOrder();
 }
 
 void SetHumanCommander(bool on)
@@ -1891,8 +2490,53 @@ static GameValue ConquestTakeControlUnary(const GameState*, GameValuePar oper1)
     return GameValue(RString(why.c_str()));
 }
 
+// conquestStart ["EAST", "soldier"|"commander", "contacts"|"shroud", "noview"]: the setup screen's Start, from a
+// script (the soak and test harnesses). Missing entries keep the mission's defaults.
+static GameValue ConquestStartUnary(const GameState*, GameValuePar oper1)
+{
+    const GameArrayType& a = oper1;
+    Poseidon::Conquest::Options options = Poseidon::Conquest::GetOptions();
+    const auto text = [&](int i) -> std::string
+    {
+        if (i >= a.Size() || a[i].GetType() != GameString)
+            return std::string();
+        const GameStringType value = a[i];
+        std::string s(static_cast<const char*>(value));
+        std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+        return s;
+    };
+    const std::vector<std::string> sides = Poseidon::Conquest::SideNames();
+    for (size_t s = 0; s < sides.size(); s++)
+        if (sides[s] == text(0))
+            options.side = static_cast<int>(s);
+    if (const std::string start = text(1); !start.empty())
+        options.startInCommand = start == "COMMANDER";
+    if (const std::string fog = text(2); !fog.empty())
+        options.fog = fog == "SHROUD" ? Poseidon::Conquest::FogMode::Shroud : Poseidon::Conquest::FogMode::Contacts;
+    if (text(3) == "NOVIEW")
+    {
+        options.commanderView = false;
+        options.startInCommand = false;
+    }
+    return GameValue(Poseidon::Conquest::BeginWar(options));
+}
+
+// conquestBarrage [x, y]: the player's side fires its mortars there. true, or why not.
+static GameValue ConquestBarrageUnary(const GameState*, GameValuePar oper1)
+{
+    const GameArrayType& a = oper1;
+    if (a.Size() < 2)
+        return GameValue(RString("conquestBarrage [x, y]"));
+    std::string why;
+    if (Poseidon::Conquest::OrderBarrage(static_cast<float>(a[0]), static_cast<float>(a[1]), &why))
+        return GameValue(true);
+    return GameValue(RString(why.c_str()));
+}
+
 INIT_MODULE(ConquestReferee, 3)
 {
+    GGameState.NewFunction(GameFunction(GameBool, "conquestStart", ConquestStartUnary, GameArray));
+    GGameState.NewFunction(GameFunction(GameAny, "conquestBarrage", ConquestBarrageUnary, GameArray));
     GGameState.NewFunction(GameFunction(GameAny, "conquestTakeControl", ConquestTakeControlUnary, GameScalar));
     GGameState.NewFunction(GameFunction(GameAny, "conquestBuy", ConquestBuyUnary, GameArray));
     GGameState.NewNularOp(GameNular(GameString, "conquestState", ConquestStateNular));

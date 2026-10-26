@@ -27,6 +27,7 @@ class ParamArchive;
 namespace Poseidon
 {
 class AIGroup;
+class Person;
 }
 
 namespace Poseidon::Conquest
@@ -144,10 +145,71 @@ bool Possessing();
 bool Possess(int groupId, std::string* reason = nullptr);
 /// Back to the player's own body; the soldier returns to the AI.
 bool ReturnToCommander();
-/// The World's single-player death check: true when Conquest took the player back to their own
-/// body (the soldier they controlled died), so the mission must not end.
+/// Become this soldier of the player's side (any soldier, not only a squad leader).
+bool PossessUnit(Person* person, std::string* reason = nullptr);
+/// The player's soldier died (Man::Killed in single player, before the game's death camera, and
+/// the World's end check). True when Conquest carried the player on: back to command, or into
+/// another soldier of their side. False only when the side has nobody left: the mission ends.
 bool OnRealPlayerDead();
-/// True once after OnRealPlayerDead: the commander view should open again.
-bool TakeReopenViewRequest();
+/// True once when the commander view should open (the war began with the player in command, or
+/// the soldier they controlled died); `notice` says why, for the view's toast.
+bool TakeViewRequest(std::string& notice);
+/// The latest thing the soldier's HUD should say once ("You were killed. You now lead Bravo.").
+bool TakeSoldierNotice(std::string& notice);
+
+/// "Alpha", "Bravo" ... "Alpha 2": a squad's callsign by its id.
+std::string Callsign(int id);
+
+// ---- the war's options and the setup screen ----
+
+enum class FogMode
+{
+    Contacts, // enemies only as the side knows them (the default)
+    Shroud,   // also: ground no friendly has seen is black (classic real-time strategy)
+};
+
+struct Options
+{
+    int side = 0;                  // index into the war's sides
+    bool startInCommand = false;   // false: lead a squad as a soldier
+    bool commanderView = true;     // the top-down command view (Ctrl+M) is available
+    FogMode fog = FogMode::Contacts;
+    bool possession = true;        // take control of any friendly soldier
+    bool hqRadio = true;           // the AI commander radios its orders while the player does not command
+};
+
+/// The mission opened with CfgConquest setup = 1 and the player has not chosen yet.
+bool SetupPending();
+/// The war's sides as the setup screen names them ("WEST", "EAST").
+std::vector<std::string> SideNames();
+/// Begin the war with these choices (the setup screen's Start, or conquestStart from a script).
+bool BeginWar(const Options& options);
+Options GetOptions();
+/// Change the options during the war (the side and start are fixed by then).
+void SetOptions(const Options& options);
+
+/// The shroud: has a soldier of the player's side been near (x, y)?
+bool Explored(float x, float y);
+
+// ---- support ----
+
+struct BarrageInfo
+{
+    float cost = 0.0f;
+    int shells = 0;
+    float cooldownLeft = 0.0f; // seconds of game time until the mortars are ready again
+};
+BarrageInfo Barrage();
+/// A mortar barrage on (x, y) for the player's side. False with a reason when it cannot be fired.
+bool OrderBarrage(float x, float y, std::string* reason = nullptr);
+
+/// What HQ last ordered the player's own squad (the soldier's HUD shows it while it stands).
+struct PlayerOrder
+{
+    bool valid = false;
+    std::string text; // "Take the command post at Figari"
+    float x = 0.0f, y = 0.0f;
+};
+PlayerOrder CurrentPlayerOrder();
 
 } // namespace Poseidon::Conquest

@@ -32,4 +32,9 @@ void Frame();
 
 /// Loads the HUD's typefaces; called between frames by the referee while a war runs.
 void PrepareFonts();
+
+/// The camera at (x, y) from `distance` metres, `pitch` degrees down, facing `yaw` degrees (0 north).
+bool PlaceCamera(float x, float y, float distance, float pitch, float yawDegrees);
+/// Select squad `groupId`, its leader, and follow him from `distance` metres, `pitch` degrees down.
+bool FollowSquad(int groupId, float distance, float pitch);
 } // namespace Poseidon::Conquest::View

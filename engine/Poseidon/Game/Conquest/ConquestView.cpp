@@ -26,6 +26,10 @@
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
+#include <Poseidon/World/Entities/Vehicles/Air/Airplane.hpp>
+#include <Poseidon/World/Entities/Vehicles/Air/Helicopter.hpp>
+#include <Poseidon/World/Entities/Vehicles/Ground/Tank.hpp>
+#include <Poseidon/World/Entities/Vehicles/Misc/Ship.hpp>
 #include <Poseidon/World/Entities/Vehicles/Transport.hpp>
 #include <Poseidon/World/Scene/Camera/CamEffects.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
@@ -53,8 +57,11 @@ namespace
 {
 constexpr float Pi = 3.14159265f;
 constexpr float PickPixels = 20.0f;
-constexpr float MinDistance = 40.0f;
-constexpr float MaxDistance = 3000.0f;
+constexpr float MinDistance = 3.0f;       // down among the soldiers
+constexpr float MaxDistance = 3500.0f;
+constexpr float FollowMinDistance = 2.2f; // a followed soldier: close, never inside him
+constexpr float MinPitch = 2.0f;          // degrees: the camera can come down to the ground
+constexpr float MaxPitch = 88.0f;
 
 // ---- look ----
 
@@ -143,19 +150,9 @@ ImU32 WithAlpha(ImU32 colour, float alpha)
     return (colour & 0x00FFFFFFu) | (static_cast<ImU32>(a) << IM_COL32_A_SHIFT);
 }
 
-const char* Callsign(int id)
-{
-    static const char* names[] = {"Alpha",  "Bravo",   "Charlie", "Delta",  "Echo",   "Foxtrot", "Golf",
-                                  "Hotel",  "India",   "Juliet",  "Kilo",   "Lima",   "Mike",    "November",
-                                  "Oscar",  "Papa",    "Quebec",  "Romeo",  "Sierra", "Tango",   "Uniform",
-                                  "Victor", "Whiskey", "X-ray",   "Yankee", "Zulu"};
-    return names[(id - 1) % 26];
-}
-
 std::string CallsignFull(int id)
 {
-    const int lap = (id - 1) / 26;
-    return lap > 0 ? std::string(Callsign(id)) + " " + std::to_string(lap + 1) : std::string(Callsign(id));
+    return Callsign(id);
 }
 
 // ---- state ----
@@ -185,6 +182,13 @@ struct State
     float pitch = 55.0f; // degrees below the horizon
     float distance = 450.0f;
     std::vector<int> selected;
+    OLink<Person> unit;      // the one soldier clicked, inside the selected squad
+    OLink<EntityAI> follow;  // the camera keeps him (or his vehicle) centred
+    bool dragPan = false;    // Ctrl + left drag moves the view
+    bool targeting = false;  // the next left click places the mortar barrage
+    bool optionsOpen = false;
+    bool setupGrab = false;  // the setup screen freed the mouse
+    std::string setupStart = "soldier";
     bool boxDrag = false;
     float boxX0 = 0.0f;
     float boxY0 = 0.0f;
@@ -211,7 +215,9 @@ struct SquadDraw
 {
     LiveGroup group;
     std::vector<ScreenPoint> members;
+    std::vector<Person*> soldiers; // members[i] is soldiers[i]
     std::vector<ScreenPoint> vehicles;
+    std::vector<const Transport*> vehicleObjects;
     ScreenPoint leader;
     bool leaderVisible = false;
     int men = 0;
@@ -297,6 +303,19 @@ float WorldSize()
 
 // ---- the camera ----
 
+// What the camera follows, alive and still worth following.
+EntityAI* Followed()
+{
+    State& s = St();
+    EntityAI* target = s.follow;
+    if (!target || target->IsDammageDestroyed())
+    {
+        s.follow = nullptr;
+        return nullptr;
+    }
+    return target;
+}
+
 void ApplyCamera()
 {
     State& s = St();
@@ -304,13 +323,26 @@ void ApplyCamera()
     if (!cam || !GLandscape)
         return;
     const float size = WorldSize();
+    float focusHeight = 0.0f;
+    if (EntityAI* target = Followed())
+    {
+        const Vector3 p = target->Position();
+        s.focusX = p.X();
+        s.focusY = p.Z();
+        // Men are looked at chest-high, vehicles a little above their centre.
+        focusHeight = p.Y() + (dyn_cast<Person>(target) ? 1.3f : 1.0f);
+        s.distance = std::max(s.distance, std::max(FollowMinDistance, target->GetRadius() * 1.1f));
+    }
     s.focusX = std::clamp(s.focusX, 0.0f, size);
     s.focusY = std::clamp(s.focusY, 0.0f, size);
+    if (!Followed())
+        focusHeight = Ground(s.focusX, s.focusY) + std::min(1.5f, s.distance * 0.1f);
     const float p = s.pitch * Pi / 180.0f;
     const Vector3 forward(std::sin(s.yaw), 0.0f, std::cos(s.yaw));
-    const Vector3 focus(s.focusX, Ground(s.focusX, s.focusY), s.focusY);
+    const Vector3 focus(s.focusX, focusHeight, s.focusY);
     Vector3 pos = focus - forward * (std::cos(p) * s.distance) + Vector3(0.0f, std::sin(p) * s.distance, 0.0f);
-    const float floor = Ground(pos.X(), pos.Z()) + 15.0f;
+    // Never below the ground: tilted all the way down, the camera stands on it.
+    const float floor = Ground(pos.X(), pos.Z()) + 0.6f;
     if (pos.Y() < floor)
         pos[1] = floor;
     cam->SetPosition(pos);
@@ -322,6 +354,7 @@ void FocusOn(float x, float y)
 {
     St().focusX = x;
     St().focusY = y;
+    St().follow = nullptr;
 }
 
 int HomeBase()
@@ -344,13 +377,20 @@ void InitialFocus()
         FocusOn(GWorld->CameraOn()->Position().X(), GWorld->CameraOn()->Position().Z());
 }
 
+// Metres of ground per screen pixel at the focus, for dragging the view.
+float MetresPerPixel()
+{
+    const ImGuiIO& io = ImGui::GetIO();
+    return io.DisplaySize.y > 0.0f ? St().distance * 1.25f / io.DisplaySize.y : 1.0f;
+}
+
 void Pan(float dt)
 {
     State& s = St();
     const bool* keys = SDL_GetKeyboardState(nullptr);
     if (!keys)
         return;
-    float ahead = 0.0f, aside = 0.0f, turn = 0.0f;
+    float ahead = 0.0f, aside = 0.0f, turn = 0.0f, tilt = 0.0f;
     if (keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP])
         ahead += 1.0f;
     if (keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN])
@@ -363,12 +403,16 @@ void Pan(float dt)
         turn += 1.0f;
     if (keys[SDL_SCANCODE_Q])
         turn -= 1.0f;
+    if (keys[SDL_SCANCODE_R])
+        tilt += 1.0f;
+    if (keys[SDL_SCANCODE_F])
+        tilt -= 1.0f;
     // The screen edge pans too, as in any strategy game (not while over a panel).
     const ImGuiIO& io = ImGui::GetIO();
     const ImVec2 mouse = io.MousePos;
     const float edge = 6.0f;
-    if (!io.WantCaptureMouse && !s.boxDrag && mouse.x >= 0.0f && mouse.y >= 0.0f && mouse.x <= io.DisplaySize.x &&
-        mouse.y <= io.DisplaySize.y)
+    if (!io.WantCaptureMouse && !s.boxDrag && !s.dragPan && mouse.x >= 0.0f && mouse.y >= 0.0f &&
+        mouse.x <= io.DisplaySize.x && mouse.y <= io.DisplaySize.y)
     {
         if (mouse.x < edge)
             aside -= 1.0f;
@@ -379,10 +423,14 @@ void Pan(float dt)
         if (mouse.y > io.DisplaySize.y - edge)
             ahead -= 1.0f;
     }
-    const float speed = s.distance * 1.1f * ((keys[SDL_SCANCODE_LSHIFT] || keys[SDL_SCANCODE_RSHIFT]) ? 2.5f : 1.0f);
+    if (ahead != 0.0f || aside != 0.0f)
+        s.follow = nullptr; // moving the view lets go of the soldier it followed
+    const float speed = std::max(s.distance, 20.0f) * 1.1f *
+                        ((keys[SDL_SCANCODE_LSHIFT] || keys[SDL_SCANCODE_RSHIFT]) ? 2.5f : 1.0f);
     s.focusX += (std::sin(s.yaw) * ahead + std::cos(s.yaw) * aside) * speed * dt;
     s.focusY += (std::cos(s.yaw) * ahead - std::sin(s.yaw) * aside) * speed * dt;
     s.yaw += turn * 1.6f * dt;
+    s.pitch = std::clamp(s.pitch + tilt * 45.0f * dt, MinPitch, MaxPitch);
 }
 
 // ---- selection and orders ----
@@ -404,16 +452,24 @@ std::vector<SquadDraw> CollectSquads()
                 if (!unit || unit->GetLifeState() != AIUnit::LSAlive)
                     continue;
                 d.men++;
+                if (!unit->IsFreeSoldier())
+                    continue; // inside a vehicle: the vehicle's symbol stands for him
                 ScreenPoint p;
-                if (Project(unit->Position() + Vector3(0.0f, 1.0f, 0.0f), p))
+                if (Project(unit->Position() + Vector3(0.0f, 2.1f, 0.0f), p))
+                {
                     d.members.push_back(p);
+                    d.soldiers.push_back(unit->GetPerson());
+                }
             }
             for (int v = 0; v < g.group->NVehicles(); v++)
             {
                 const Transport* veh = g.group->GetVehicle(v);
                 ScreenPoint p;
-                if (veh && !veh->IsDammageDestroyed() && Project(veh->Position() + Vector3(0.0f, 1.5f, 0.0f), p))
+                if (veh && !veh->IsDammageDestroyed() && Project(veh->Position() + Vector3(0.0f, 3.2f, 0.0f), p))
+                {
                     d.vehicles.push_back(p);
+                    d.vehicleObjects.push_back(veh);
+                }
             }
             const Vector3 lp = g.group->Leader()->Position();
             d.worldX = lp.X();
@@ -440,35 +496,62 @@ void ToggleSelected(int id)
         sel.erase(it);
 }
 
+// A click selects the squad of the soldier (or vehicle) under the pointer, and that soldier: the
+// camera follows him and "Take control" becomes him.
 void ClickSelect(float x, float y, bool add)
 {
+    State& s = St();
     int best = 0;
+    Person* soldier = nullptr;
+    const Transport* vehicle = nullptr;
     float bestD2 = PickPixels * PickPixels;
     for (const SquadDraw& d : CollectSquads())
     {
-        auto consider = [&](const ScreenPoint& p)
+        for (size_t i = 0; i < d.members.size(); i++)
         {
-            const float d2 = (p.x - x) * (p.x - x) + (p.y - y) * (p.y - y);
+            const float d2 = (d.members[i].x - x) * (d.members[i].x - x) + (d.members[i].y - y) * (d.members[i].y - y);
             if (d2 < bestD2)
             {
                 bestD2 = d2;
                 best = d.group.id;
+                soldier = d.soldiers[i];
+                vehicle = nullptr;
             }
-        };
-        for (const ScreenPoint& p : d.members)
-            consider(p);
-        for (const ScreenPoint& p : d.vehicles)
-            consider(p);
+        }
+        for (size_t i = 0; i < d.vehicles.size(); i++)
+        {
+            const float d2 = (d.vehicles[i].x - x) * (d.vehicles[i].x - x) + (d.vehicles[i].y - y) * (d.vehicles[i].y - y);
+            if (d2 < bestD2)
+            {
+                bestD2 = d2;
+                best = d.group.id;
+                soldier = nullptr;
+                vehicle = d.vehicleObjects[i];
+            }
+        }
     }
     if (!add)
-        St().selected.clear();
-    if (best)
+        s.selected.clear();
+    if (!best)
     {
-        if (add)
-            ToggleSelected(best);
-        else
-            St().selected.push_back(best);
+        if (!add)
+        {
+            s.unit = nullptr;
+            s.follow = nullptr;
+        }
+        return;
     }
+    if (add)
+        ToggleSelected(best);
+    else
+        s.selected.push_back(best);
+    s.unit = soldier;
+    if (soldier)
+        s.follow = soldier;
+    else if (vehicle)
+        s.follow = const_cast<Transport*>(vehicle);
+    if (s.follow && s.distance > 120.0f)
+        s.distance = 120.0f; // come down to the soldier picked
 }
 
 void BoxSelect(float x0, float y0, float x1, float y1, bool add)
@@ -477,14 +560,17 @@ void BoxSelect(float x0, float y0, float x1, float y1, bool add)
     const float top = std::min(y0, y1), bottom = std::max(y0, y1);
     if (!add)
         St().selected.clear();
+    St().unit = nullptr;
     for (const SquadDraw& d : CollectSquads())
+    {
+        bool inside = false;
         for (const ScreenPoint& p : d.members)
-            if (p.x >= left && p.x <= right && p.y >= top && p.y <= bottom)
-            {
-                if (!IsSelected(d.group.id))
-                    St().selected.push_back(d.group.id);
-                break;
-            }
+            inside = inside || (p.x >= left && p.x <= right && p.y >= top && p.y <= bottom);
+        for (const ScreenPoint& p : d.vehicles)
+            inside = inside || (p.x >= left && p.x <= right && p.y >= top && p.y <= bottom);
+        if (inside && !IsSelected(d.group.id))
+            St().selected.push_back(d.group.id);
+    }
 }
 
 void OrderAt(float uiX, float uiY)
@@ -527,16 +613,33 @@ void OrderAt(float uiX, float uiY)
     SetStatus(what + (n == 1 ? "  -  1 squad" : "  -  " + std::to_string(n) + " squads"));
 }
 
+void FireBarrageAt(float uiX, float uiY)
+{
+    State& s = St();
+    s.targeting = false;
+    float x = 0.0f, y = 0.0f;
+    if (!GroundAt(uiX, uiY, x, y))
+        return;
+    std::string why;
+    if (!OrderBarrage(x, y, &why))
+    {
+        SetStatus("No barrage: " + why, ColWarn);
+        return;
+    }
+    s.flashes.push_back({x, y, SDL_GetTicks()});
+    SetStatus("Mortars firing. Rounds land in about seven seconds.", ColWarn);
+}
+
 void TakeControl()
 {
     State& s = St();
-    if (s.selected.empty())
-        return;
-    const int id = s.selected.front();
     std::string why;
-    if (!Possess(id, &why))
+    Person* soldier = s.unit;
+    const bool ok = soldier ? PossessUnit(soldier, &why) : !s.selected.empty() && Possess(s.selected.front(), &why);
+    if (!ok)
     {
-        SetStatus("Cannot take control: " + why, ColWarn);
+        if (!why.empty())
+            SetStatus("Cannot take control: " + why, ColWarn);
         return;
     }
     SetActive(false);
@@ -567,16 +670,37 @@ const char* Task(const LiveGroup& g, const Snapshot& snap, std::string& buffer)
     return "Awaiting orders";
 }
 
-ImU32 SideColour(int side, float alpha = 1.0f)
+// 0 blue (WEST), 1 red (EAST), 2 green (resistance), -1 neutral grey.
+int Family(int side)
 {
     const Snapshot& snap = GetSnapshot();
-    ImU32 c = IM_COL32(190, 196, 205, 255);
-    if (side >= 0 && side < static_cast<int>(snap.sideNames.size()))
-    {
-        const std::string& n = snap.sideNames[side];
-        c = n == "WEST" ? IM_COL32(74, 152, 255, 255) : n == "EAST" ? IM_COL32(236, 76, 64, 255) : IM_COL32(86, 196, 98, 255);
-    }
-    return WithAlpha(c, alpha);
+    if (side < 0 || side >= static_cast<int>(snap.sideNames.size()))
+        return -1;
+    const std::string& n = snap.sideNames[side];
+    return n == "WEST" ? 0 : n == "EAST" ? 1 : 2;
+}
+
+ImU32 SideColour(int side, float alpha = 1.0f)
+{
+    static const ImU32 base[] = {IM_COL32(74, 152, 255, 255), IM_COL32(236, 76, 64, 255), IM_COL32(86, 196, 98, 255)};
+    const int f = Family(side);
+    return WithAlpha(f < 0 ? IM_COL32(190, 196, 205, 255) : base[f], alpha);
+}
+
+// Every squad its own shade of its side's colour, so neighbouring squads read apart on the ground.
+ImU32 SquadShade(int side, int id, float alpha = 1.0f)
+{
+    static const ImU32 shades[3][8] = {
+        {IM_COL32(74, 152, 255, 255), IM_COL32(40, 104, 228, 255), IM_COL32(128, 186, 255, 255), IM_COL32(28, 74, 186, 255),
+         IM_COL32(96, 214, 255, 255), IM_COL32(104, 128, 236, 255), IM_COL32(170, 208, 255, 255), IM_COL32(52, 140, 200, 255)},
+        {IM_COL32(236, 76, 64, 255), IM_COL32(196, 34, 40, 255), IM_COL32(255, 126, 102, 255), IM_COL32(160, 26, 52, 255),
+         IM_COL32(255, 96, 140, 255), IM_COL32(222, 108, 60, 255), IM_COL32(255, 164, 150, 255), IM_COL32(180, 60, 90, 255)},
+        {IM_COL32(86, 196, 98, 255), IM_COL32(46, 148, 70, 255), IM_COL32(144, 222, 120, 255), IM_COL32(36, 118, 58, 255),
+         IM_COL32(120, 210, 170, 255), IM_COL32(170, 200, 80, 255), IM_COL32(180, 236, 160, 255), IM_COL32(70, 160, 120, 255)}};
+    const int f = Family(side);
+    if (f < 0)
+        return SideColour(side, alpha);
+    return WithAlpha(shades[f][static_cast<size_t>(std::max(id, 1) - 1) % 8], alpha);
 }
 
 std::string SideTitle(int side)
@@ -597,30 +721,196 @@ void Pill(ImDrawList* draw, ImVec2 centre, ImFont* font, float size, const char*
     Put(draw, font, size, ImVec2(centre.x - t.x * 0.5f, centre.y - t.y * 0.5f), colour, text);
 }
 
+// ---- military symbols (after APP-6 / MIL-STD-2525: a frame for the affiliation, a glyph for the arm) ----
+
+enum class Arm
+{
+    Infantry,
+    Motorised, // wheeled: cars, trucks
+    Armour,    // tracked, no troops: tanks
+    Mechanised, // tracked with troops: APCs and IFVs
+    Rotary,    // helicopters
+    FixedWing,
+    Naval,
+};
+
+Arm ArmOf(const EntityAI* e)
+{
+    if (!e || dynamic_cast<const Person*>(e))
+        return Arm::Infantry;
+    if (dynamic_cast<const Helicopter*>(e))
+        return Arm::Rotary;
+    if (dynamic_cast<const Airplane*>(e))
+        return Arm::FixedWing;
+    if (dynamic_cast<const Ship*>(e))
+        return Arm::Naval;
+    if (const Tank* tank = dynamic_cast<const Tank*>(e))
+        return tank->Type()->GetMaxManCargo() >= 4 ? Arm::Mechanised : Arm::Armour;
+    return Arm::Motorised;
+}
+
+// A small symbol whose bottom edge sits at `foot`, so the soldier or vehicle under it stays in view.
+// Friendly forces in a rectangle, hostile ones in a diamond.
+void DrawSymbol(ImDrawList* draw, ImVec2 foot, float h, Arm arm, bool hostile, ImU32 colour, float alpha, bool selected)
+{
+    const float w = hostile ? h * 1.25f : h * 1.5f;
+    const ImVec2 c(foot.x, foot.y - h * 0.5f - (hostile ? h * 0.15f : 0.0f));
+    const ImU32 fill = WithAlpha(colour, 0.5f * alpha);
+    const ImU32 edge = WithAlpha(colour, alpha);
+    const ImU32 line = IM_COL32(255, 255, 255, static_cast<int>(230 * alpha));
+    const float thick = h >= 9.0f ? 1.4f : 1.1f;
+    float l, r, t, b; // where the glyph goes
+    if (hostile)
+    {
+        const float hw = w * 0.5f, hh = h * 0.65f;
+        draw->AddQuadFilled(ImVec2(c.x, c.y - hh), ImVec2(c.x + hw, c.y), ImVec2(c.x, c.y + hh), ImVec2(c.x - hw, c.y), fill);
+        draw->AddQuad(ImVec2(c.x, c.y - hh), ImVec2(c.x + hw, c.y), ImVec2(c.x, c.y + hh), ImVec2(c.x - hw, c.y), edge, thick);
+        l = c.x - hw * 0.5f, r = c.x + hw * 0.5f, t = c.y - hh * 0.5f, b = c.y + hh * 0.5f;
+    }
+    else
+    {
+        l = c.x - w * 0.5f, r = c.x + w * 0.5f, t = c.y - h * 0.5f, b = c.y + h * 0.5f;
+        draw->AddRectFilled(ImVec2(l, t), ImVec2(r, b), fill, 1.0f);
+        draw->AddRect(ImVec2(l, t), ImVec2(r, b), edge, 1.0f, 0, thick);
+    }
+    if (selected)
+    {
+        const float m = 3.0f;
+        draw->AddRect(ImVec2(l - m - (hostile ? w * 0.25f : 0.0f), t - m - (hostile ? h * 0.15f : 0.0f)),
+                      ImVec2(r + m + (hostile ? w * 0.25f : 0.0f), b + m + (hostile ? h * 0.15f : 0.0f)), ColSelect, 2.0f, 0, 1.5f);
+    }
+    const ImVec2 mid((l + r) * 0.5f, (t + b) * 0.5f);
+    const auto cross = [&]()
+    {
+        draw->AddLine(ImVec2(l, t), ImVec2(r, b), line, 1.0f);
+        draw->AddLine(ImVec2(l, b), ImVec2(r, t), line, 1.0f);
+    };
+    const auto track = [&]() { draw->AddEllipse(mid, ImVec2((r - l) * 0.34f, (b - t) * 0.3f), line, 0.0f, 16, 1.0f); };
+    switch (arm)
+    {
+        case Arm::Infantry:
+            cross();
+            break;
+        case Arm::Motorised:
+            cross();
+            draw->AddLine(ImVec2(mid.x, t), ImVec2(mid.x, b), line, 1.0f);
+            break;
+        case Arm::Armour:
+            track();
+            break;
+        case Arm::Mechanised:
+            cross();
+            track();
+            break;
+        case Arm::Rotary:
+            draw->AddTriangleFilled(ImVec2(l + 1.0f, t + 1.0f), ImVec2(l + 1.0f, b - 1.0f), mid, line);
+            draw->AddTriangleFilled(ImVec2(r - 1.0f, t + 1.0f), ImVec2(r - 1.0f, b - 1.0f), mid, line);
+            break;
+        case Arm::FixedWing:
+            draw->AddLine(ImVec2(l + 1.0f, mid.y), ImVec2(r - 1.0f, mid.y), line, 1.0f);
+            draw->AddLine(ImVec2(mid.x, t + 1.0f), ImVec2(mid.x, b - 1.0f), line, 1.0f);
+            break;
+        case Arm::Naval:
+            draw->AddCircle(mid, (b - t) * 0.3f, line, 10, 1.0f);
+            break;
+    }
+}
+
+// Symbols fade as the camera comes down among the men: up close the 3D soldier is the information.
+float SymbolAlpha()
+{
+    const float d = St().distance;
+    return d < 60.0f ? 0.35f + 0.65f * std::clamp((d - 8.0f) / 52.0f, 0.0f, 1.0f) : 1.0f;
+}
+
+// The shroud (Fog of war: Shroud): ground no soldier of the player's side has been near is black,
+// with soft edges where explored and unexplored cells meet.
+void DrawShroud(ImDrawList* draw)
+{
+    if (GetOptions().fog != FogMode::Shroud || !GLandscape)
+        return;
+    const State& s = St();
+    constexpr float cell = 100.0f;
+    const float range = std::clamp(s.distance * 4.0f, 900.0f, 7000.0f);
+    const int x0 = static_cast<int>(std::floor((s.focusX - range) / cell));
+    const int y0 = static_cast<int>(std::floor((s.focusY - range) / cell));
+    const int n = static_cast<int>(std::ceil(2.0f * range / cell)) + 1;
+    const float size = WorldSize();
+    // Corner values: how much of the four cells round a corner is unexplored (0..1), and where it projects.
+    std::vector<float> dark(static_cast<size_t>(n + 1) * (n + 1));
+    std::vector<ScreenPoint> at(dark.size());
+    std::vector<uint8_t> ok(dark.size());
+    const auto unexplored = [&](int cx, int cy)
+    {
+        const float x = (static_cast<float>(cx) + 0.5f) * cell, y = (static_cast<float>(cy) + 0.5f) * cell;
+        if (x < 0.0f || y < 0.0f || x > size || y > size)
+            return 1.0f;
+        return Explored(x, y) ? 0.0f : 1.0f;
+    };
+    for (int j = 0; j <= n; j++)
+        for (int i = 0; i <= n; i++)
+        {
+            const int cx = x0 + i, cy = y0 + j;
+            const size_t k = static_cast<size_t>(j) * (n + 1) + i;
+            dark[k] = 0.25f * (unexplored(cx - 1, cy - 1) + unexplored(cx, cy - 1) + unexplored(cx - 1, cy) + unexplored(cx, cy));
+            if (dark[k] <= 0.0f)
+                continue;
+            const float x = static_cast<float>(cx) * cell, y = static_cast<float>(cy) * cell;
+            ok[k] = Project(Vector3(x, Ground(x, y) + 0.3f, y), at[k]) ? 1 : 0;
+        }
+    const ImVec2 uv = ImGui::GetFontTexUvWhitePixel();
+    for (int j = 0; j < n; j++)
+        for (int i = 0; i < n; i++)
+        {
+            const size_t k[4] = {static_cast<size_t>(j) * (n + 1) + i, static_cast<size_t>(j) * (n + 1) + i + 1,
+                                 static_cast<size_t>(j + 1) * (n + 1) + i + 1, static_cast<size_t>(j + 1) * (n + 1) + i};
+            if (dark[k[0]] + dark[k[1]] + dark[k[2]] + dark[k[3]] <= 0.0f)
+                continue;
+            if (!ok[k[0]] || !ok[k[1]] || !ok[k[2]] || !ok[k[3]])
+                continue;
+            draw->PrimReserve(6, 4);
+            const ImDrawIdx base = static_cast<ImDrawIdx>(draw->_VtxCurrentIdx);
+            draw->PrimWriteIdx(base);
+            draw->PrimWriteIdx(static_cast<ImDrawIdx>(base + 1));
+            draw->PrimWriteIdx(static_cast<ImDrawIdx>(base + 2));
+            draw->PrimWriteIdx(base);
+            draw->PrimWriteIdx(static_cast<ImDrawIdx>(base + 2));
+            draw->PrimWriteIdx(static_cast<ImDrawIdx>(base + 3));
+            for (size_t q : k)
+                draw->PrimWriteVtx(ImVec2(at[q].x, at[q].y), uv, IM_COL32(4, 6, 9, static_cast<int>(245 * dark[q])));
+        }
+}
+
 void DrawObjectives(ImDrawList* draw)
 {
     const Snapshot& snap = GetSnapshot();
     const Fonts& f = Font();
+    const auto ring = [&](const ObjectiveDef& d, float radius, ImU32 colour, float thickness, bool dashed)
+    {
+        ScreenPoint prev;
+        bool prevOk = false;
+        const int steps = radius > 60.0f ? 72 : 40;
+        for (int i = 0; i <= steps; i++)
+        {
+            const float a = static_cast<float>(i) * (2.0f * Pi / static_cast<float>(steps));
+            const float x = d.x + std::cos(a) * radius, y = d.y + std::sin(a) * radius;
+            ScreenPoint p;
+            const bool ok = Project(Vector3(x, Ground(x, y) + 0.4f, y), p);
+            if (ok && prevOk && (!dashed || i % 2 == 0))
+                draw->AddLine(ImVec2(prev.x, prev.y), ImVec2(p.x, p.y), colour, thickness);
+            prev = p;
+            prevOk = ok;
+        }
+    };
     for (size_t o = 0; o < snap.war.defs.size(); o++)
     {
         const ObjectiveDef& d = snap.war.defs[o];
         const ObjectiveState& st = snap.war.states[o];
-        const ImU32 ring = SideColour(st.owner, st.contested ? 0.45f : 0.75f);
-        ScreenPoint prev;
-        bool prevOk = false;
-        for (int i = 0; i <= 72; i++)
-        {
-            const float a = static_cast<float>(i) * (2.0f * Pi / 72.0f);
-            const float x = d.x + std::cos(a) * d.radius, y = d.y + std::sin(a) * d.radius;
-            ScreenPoint p;
-            const bool ok = Project(Vector3(x, Ground(x, y) + 0.5f, y), p);
-            if (ok && prevOk)
-                draw->AddLine(ImVec2(prev.x, prev.y), ImVec2(p.x, p.y), ring, 2.5f);
-            prev = p;
-            prevOk = ok;
-        }
+        // The town, faint; the command post's small capture circle, strong: only soldiers inside it count.
+        ring(d, d.radius, SideColour(st.owner, 0.3f), 1.5f, true);
+        ring(d, d.captureRadius, SideColour(st.owner, st.contested ? 0.6f : 0.95f), 3.0f, false);
         ScreenPoint c;
-        if (!Project(Vector3(d.x, Ground(d.x, d.y) + 25.0f, d.y), c))
+        if (!Project(Vector3(d.x, Ground(d.x, d.y) + 14.0f, d.y), c))
             continue;
         std::string name = d.name;
         if (d.kind == ObjectiveKind::HQ)
@@ -643,10 +933,13 @@ void DrawSquads(ImDrawList* draw, const std::vector<SquadDraw>& squads)
 {
     const Snapshot& snap = GetSnapshot();
     const Fonts& f = Font();
+    const State& s = St();
+    const float alpha = SymbolAlpha();
+    const Person* picked = s.unit;
     for (const SquadDraw& d : squads)
     {
         const bool sel = IsSelected(d.group.id);
-        const ImU32 colour = SideColour(d.group.side);
+        const ImU32 colour = SquadShade(d.group.side, d.group.id);
         if (sel && d.group.task != TaskKind::None && d.leaderVisible)
         {
             // Where it was sent: a dashed line from the squad to its destination.
@@ -659,31 +952,24 @@ void DrawSquads(ImDrawList* draw, const std::vector<SquadDraw>& squads)
                 {
                     const float t1 = std::min(t + 8.0f, len);
                     draw->AddLine(ImVec2(d.leader.x + dx * t / len, d.leader.y + dy * t / len),
-                                  ImVec2(d.leader.x + dx * t1 / len, d.leader.y + dy * t1 / len), WithAlpha(ColSelect, 0.7f),
+                                  ImVec2(d.leader.x + dx * t1 / len, d.leader.y + dy * t1 / len), WithAlpha(colour, 0.8f),
                                   2.0f);
                 }
-                draw->AddCircle(ImVec2(dest.x, dest.y), 7.0f, ColSelect, 16, 2.0f);
+                draw->AddCircle(ImVec2(dest.x, dest.y), 7.0f, colour, 16, 2.0f);
             }
         }
-        for (const ScreenPoint& p : d.vehicles)
-        {
-            const ImVec2 a(p.x - 9.0f, p.y - 6.0f), b(p.x + 9.0f, p.y + 6.0f);
-            draw->AddRectFilled(a, b, WithAlpha(colour, 0.35f), 3.0f);
-            draw->AddRect(a, b, sel ? ColSelect : colour, 3.0f, 0, 2.0f);
-        }
-        for (const ScreenPoint& p : d.members)
-        {
-            if (sel)
-                draw->AddCircle(ImVec2(p.x, p.y), 8.0f, ColSelect, 16, 2.0f);
-            draw->AddCircleFilled(ImVec2(p.x, p.y), 4.0f, colour);
-            draw->AddCircle(ImVec2(p.x, p.y), 4.5f, IM_COL32(255, 255, 255, 170), 12, 1.0f);
-        }
+        for (size_t i = 0; i < d.vehicles.size(); i++)
+            DrawSymbol(draw, ImVec2(d.vehicles[i].x, d.vehicles[i].y), 10.0f, ArmOf(d.vehicleObjects[i]), false, colour,
+                       alpha, sel && !picked);
+        for (size_t i = 0; i < d.members.size(); i++)
+            DrawSymbol(draw, ImVec2(d.members[i].x, d.members[i].y), 7.0f, Arm::Infantry, false, colour, alpha,
+                       sel && (!picked || d.soldiers[i] == picked));
         if (!d.leaderVisible)
             continue;
         const std::string name = CallsignFull(d.group.id) + "  " + std::to_string(d.men);
-        const ImVec2 at(d.leader.x, d.leader.y - 16.0f);
+        const ImVec2 at(d.leader.x, d.leader.y - 24.0f);
         Pill(draw, at, f.bold, 13.0f, name.c_str(), sel ? IM_COL32(18, 60, 72, 235) : IM_COL32(12, 16, 22, 200),
-             sel ? ColSelect : ColText);
+             sel ? ColSelect : colour);
         if (sel)
         {
             std::string buffer;
@@ -694,6 +980,7 @@ void DrawSquads(ImDrawList* draw, const std::vector<SquadDraw>& squads)
     }
 }
 
+// The enemy as the player's side knows it (both fog-of-war modes): fading with the age of the report.
 void DrawContacts(ImDrawList* draw)
 {
     const int me = PlayerSide();
@@ -702,18 +989,15 @@ void DrawContacts(ImDrawList* draw)
     for (int s = 0; s < snap.war.sideCount; s++)
         if (s != me)
             enemy = s;
+    const float alpha = SymbolAlpha();
     for (const Contact& c : KnownEnemies(me))
     {
         ScreenPoint p;
-        if (!Project(Vector3(c.x, c.height + 1.0f, c.y), p))
+        if (!Project(Vector3(c.x, c.height + (c.vehicle ? 3.2f : 2.1f), c.y), p))
             continue;
-        // Older knowledge fades: this is what the side believes, not where the enemy is.
         const float fresh = 1.0f - std::clamp(c.age / 120.0f, 0.0f, 0.75f);
-        const float r = c.vehicle ? 9.0f : 6.0f;
-        draw->AddQuadFilled(ImVec2(p.x, p.y - r), ImVec2(p.x + r, p.y), ImVec2(p.x, p.y + r), ImVec2(p.x - r, p.y),
-                            SideColour(enemy, 0.85f * fresh));
-        draw->AddQuad(ImVec2(p.x, p.y - r), ImVec2(p.x + r, p.y), ImVec2(p.x, p.y + r), ImVec2(p.x - r, p.y),
-                      IM_COL32(255, 255, 255, static_cast<int>(160 * fresh)), 1.0f);
+        DrawSymbol(draw, ImVec2(p.x, p.y), c.vehicle ? 10.0f : 7.0f, c.vehicle ? Arm::Armour : Arm::Infantry, true,
+                   SideColour(enemy), alpha * fresh, false);
     }
 }
 
@@ -737,6 +1021,32 @@ void DrawFlashes(ImDrawList* draw)
 void DrawBox(ImDrawList* draw)
 {
     const State& s = St();
+    if (s.targeting)
+    {
+        // The barrage's reach under the pointer.
+        const ImVec2 m = ImGui::GetIO().MousePos;
+        float x = 0.0f, y = 0.0f;
+        if (GroundAt(m.x, m.y, x, y))
+        {
+            const float spread = 35.0f;
+            ScreenPoint prev;
+            bool prevOk = false;
+            for (int i = 0; i <= 40; i++)
+            {
+                const float a = static_cast<float>(i) * (2.0f * Pi / 40.0f);
+                const float px = x + std::cos(a) * spread, py = y + std::sin(a) * spread;
+                ScreenPoint p;
+                const bool ok = Project(Vector3(px, Ground(px, py) + 0.4f, py), p);
+                if (ok && prevOk)
+                    draw->AddLine(ImVec2(prev.x, prev.y), ImVec2(p.x, p.y), ColWarn, 2.0f);
+                prev = p;
+                prevOk = ok;
+            }
+        }
+        draw->AddLine(ImVec2(m.x - 10.0f, m.y), ImVec2(m.x + 10.0f, m.y), ColWarn, 1.5f);
+        draw->AddLine(ImVec2(m.x, m.y - 10.0f), ImVec2(m.x, m.y + 10.0f), ColWarn, 1.5f);
+        return;
+    }
     if (!s.boxDrag)
         return;
     const ImVec2 m = ImGui::GetIO().MousePos;
@@ -865,6 +1175,12 @@ void DrawTopBar(const Snapshot& snap)
         ImGui::SameLine(0.0f, 26.0f);
         std::snprintf(buf, sizeof(buf), "%d:%02d:%02d", clock / 3600, (clock / 60) % 60, clock % 60);
         Stat("WAR TIME", buf);
+        ImGui::SameLine(0.0f, 22.0f);
+        ImGui::BeginGroup();
+        Label(Font().body, 12.0f, ColMuted, " ");
+        if (ImGui::Button(St().optionsOpen ? "Close options" : "Options"))
+            St().optionsOpen = !St().optionsOpen;
+        ImGui::EndGroup();
     }
     ImGui::End();
 }
@@ -955,16 +1271,73 @@ void DrawSoldierHud(const Snapshot& snap)
         Put(draw, f.body, 13.0f, ImVec2(x, 20.0f), ColMuted, "Ctrl+M  Command");
     }
 
-    // Inside an objective: its capture bar, front and centre.
+    // HQ's order for the player's squad: what, where (bearing and distance).
     Person* player = GWorld ? GWorld->GetRealPlayer() : nullptr;
+    if (const PlayerOrder order = CurrentPlayerOrder(); order.valid && player)
+    {
+        const Vector3 p = player->Position();
+        const float dx = order.x - p.X(), dy = order.y - p.Z();
+        const float dist = std::hypot(dx, dy);
+        float bearing = std::atan2(dx, dy) * 180.0f / Pi;
+        if (bearing < 0.0f)
+            bearing += 360.0f;
+        static const char* compass[] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
+        char where[64];
+        if (dist < 1000.0f)
+            std::snprintf(where, sizeof(where), "%.0f m %s", dist, compass[static_cast<int>((bearing + 22.5f) / 45.0f) % 8]);
+        else
+            std::snprintf(where, sizeof(where), "%.1f km %s", dist / 1000.0f, compass[static_cast<int>((bearing + 22.5f) / 45.0f) % 8]);
+        const std::string line = "HQ:  " + order.text;
+        const float w = Measure(f.bold, 15.0f, line.c_str()).x + Measure(f.body, 14.0f, where).x + 56.0f;
+        const ImVec2 a(14.0f, 56.0f), b(14.0f + w, 90.0f);
+        draw->AddRectFilled(a, b, WithAlpha(ColPanel, 0.82f), 12.0f);
+        draw->AddRectFilled(ImVec2(a.x, a.y + 6.0f), ImVec2(a.x + 4.0f, b.y - 6.0f), SideColour(me), 2.0f);
+        Put(draw, f.bold, 15.0f, ImVec2(a.x + 16.0f, a.y + 8.0f), ColText, line.c_str());
+        Put(draw, f.body, 14.0f, ImVec2(b.x - Measure(f.body, 14.0f, where).x - 16.0f, a.y + 9.0f), ColMuted, where);
+    }
+
+    // Something that happened to the player (killed, carried on as another soldier).
+    {
+        static std::string notice;
+        static Uint64 noticeTicks = 0;
+        if (std::string fresh; TakeSoldierNotice(fresh))
+        {
+            notice = fresh;
+            noticeTicks = SDL_GetTicks();
+        }
+        const Uint64 age = SDL_GetTicks() - noticeTicks;
+        if (!notice.empty() && age < 6000)
+        {
+            const float alpha = age > 5200 ? 1.0f - static_cast<float>(age - 5200) / 800.0f : 1.0f;
+            const ImVec2 t = Measure(f.display, 22.0f, notice.c_str());
+            const ImVec2 c(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.38f);
+            draw->AddRectFilled(ImVec2(c.x - t.x * 0.5f - 24.0f, c.y - 22.0f), ImVec2(c.x + t.x * 0.5f + 24.0f, c.y + 22.0f),
+                                WithAlpha(ColPanel, 0.88f * alpha), 22.0f);
+            Put(draw, f.display, 22.0f, ImVec2(c.x - t.x * 0.5f, c.y - t.y * 0.5f), WithAlpha(ColWarn, alpha), notice.c_str());
+        }
+    }
+
+    // At a command post: its capture bar, front and centre. In the town but outside the post's
+    // circle: how far the post is, since only soldiers by it count.
     if (player)
     {
         const Vector3 p = player->Position();
         for (size_t o = 0; o < snap.war.defs.size(); o++)
         {
             const ObjectiveDef& d = snap.war.defs[o];
-            if (std::hypot(p.X() - d.x, p.Z() - d.y) > d.radius)
+            const float dist = std::hypot(p.X() - d.x, p.Z() - d.y);
+            if (dist > d.radius)
                 continue;
+            if (dist > d.captureRadius)
+            {
+                char text[96];
+                std::snprintf(text, sizeof(text), "%s command post  %.0f m", d.name.c_str(), dist - d.captureRadius);
+                const ImVec2 t = Measure(f.bold, 15.0f, text);
+                const ImVec2 a(io.DisplaySize.x * 0.5f - t.x * 0.5f - 18.0f, 56.0f);
+                draw->AddRectFilled(a, ImVec2(a.x + t.x + 36.0f, a.y + 32.0f), WithAlpha(ColPanel, 0.82f), 16.0f);
+                Put(draw, f.bold, 15.0f, ImVec2(a.x + 18.0f, a.y + 16.0f - t.y * 0.5f), SideColour(snap.war.states[o].owner), text);
+                break;
+            }
             const ObjectiveState& st = snap.war.states[o];
             const char* state = st.contested ? "CONTESTED"
                                 : st.owner == me && st.holder == me && st.level >= 1.0f ? "SECURE"
@@ -1050,7 +1423,7 @@ void DrawSquadList(const Snapshot& snap, const std::vector<SquadDraw>& squads)
             draw->AddRectFilled(at, b, sel ? WithAlpha(ColSelect, 0.16f) : hovered ? ColCardHover : ColCard, 10.0f);
             if (sel)
                 draw->AddRect(at, b, WithAlpha(ColSelect, 0.8f), 10.0f, 0, 1.5f);
-            draw->AddRectFilled(ImVec2(at.x, at.y + 8.0f), ImVec2(at.x + 4.0f, b.y - 8.0f), SideColour(d.group.side), 2.0f);
+            draw->AddRectFilled(ImVec2(at.x, at.y + 8.0f), ImVec2(at.x + 4.0f, b.y - 8.0f), SquadShade(d.group.side, d.group.id), 2.0f);
 
             const std::string name = CallsignFull(d.group.id);
             Put(draw, Font().bold, 16.0f, ImVec2(at.x + 16.0f, at.y + 7.0f), ColText, name.c_str());
@@ -1162,7 +1535,7 @@ void DrawDeploy(const Snapshot& snap)
 
         // The squads to buy, as tiles.
         const std::vector<SquadInfo> types = SquadTypes();
-        const float tileW = 156.0f, tileH = 74.0f;
+        const float tileW = 156.0f, tileH = 50.0f; // compact: the panel and its SUPPORT fit a 720p screen
         for (size_t t = 0; t < types.size(); t++)
         {
             if (t % 2 == 1)
@@ -1179,13 +1552,13 @@ void DrawDeploy(const Snapshot& snap)
                                            : IM_COL32(30, 34, 42, 200),
                                 10.0f);
             const ImU32 text = can ? ColText : ColMuted;
-            Put(draw, Font().bold, 15.0f, ImVec2(at.x + 12.0f, at.y + 9.0f), text, types[t].name.c_str());
+            Put(draw, Font().bold, 14.0f, ImVec2(at.x + 12.0f, at.y + 7.0f), text, types[t].name.c_str());
             char line[64];
             std::snprintf(line, sizeof(line), "%d soldiers", types[t].size);
-            Put(draw, Font().body, 12.5f, ImVec2(at.x + 12.0f, at.y + 32.0f), ColMuted, line);
+            Put(draw, Font().body, 12.0f, ImVec2(at.x + 12.0f, at.y + 28.0f), ColMuted, line);
             std::snprintf(line, sizeof(line), "%.0f", types[t].cost);
-            const ImVec2 ct = Measure(Font().display, 18.0f, line);
-            Put(draw, Font().display, 18.0f, ImVec2(b.x - ct.x - 12.0f, b.y - ct.y - 8.0f), can ? ColGood : ColBad, line);
+            const ImVec2 ct = Measure(Font().display, 16.0f, line);
+            Put(draw, Font().display, 16.0f, ImVec2(b.x - ct.x - 10.0f, b.y - ct.y - 6.0f), can ? ColGood : ColBad, line);
             if (pressed && can)
             {
                 std::string refused;
@@ -1208,9 +1581,165 @@ void DrawDeploy(const Snapshot& snap)
             ImGui::PopID();
         }
         ImGui::Spacing();
-        ImGui::Separator();
-        if (ImGui::Checkbox("Allow taking control of soldiers", &s.possessionToggle))
-            SetPossessionAllowed(s.possessionToggle);
+        Heading("SUPPORT");
+        ImGui::Spacing();
+        {
+            const BarrageInfo b = Barrage();
+            const bool ready = b.cooldownLeft <= 0.0f && snap.war.pool[me] >= b.cost;
+            const ImVec2 at = ImGui::GetCursorScreenPos();
+            const float w = 322.0f, h = 50.0f;
+            const bool pressed = ImGui::InvisibleButton("barrage", ImVec2(w, h));
+            const bool hovered = ImGui::IsItemHovered();
+            ImDrawList* draw = ImGui::GetWindowDrawList();
+            draw->AddRectFilled(at, ImVec2(at.x + w, at.y + h),
+                                s.targeting ? WithAlpha(ColWarn, 0.25f)
+                                : ready     ? (hovered ? IM_COL32(60, 78, 102, 255) : IM_COL32(38, 48, 64, 255))
+                                            : IM_COL32(30, 34, 42, 200),
+                                10.0f);
+            Put(draw, Font().bold, 14.0f, ImVec2(at.x + 12.0f, at.y + 7.0f), ready ? ColText : ColMuted, "Mortar barrage");
+            char line[96];
+            if (b.cooldownLeft > 0.0f)
+                std::snprintf(line, sizeof(line), "%d rounds  -  reloading, %.0f s", b.shells, b.cooldownLeft);
+            else
+                std::snprintf(line, sizeof(line), "%d rounds  -  %s", b.shells, s.targeting ? "click the target" : "ready");
+            Put(draw, Font().body, 12.0f, ImVec2(at.x + 12.0f, at.y + 28.0f), ColMuted, line);
+            std::snprintf(line, sizeof(line), "%.0f", b.cost);
+            const ImVec2 ct = Measure(Font().display, 16.0f, line);
+            Put(draw, Font().display, 16.0f, ImVec2(at.x + w - ct.x - 10.0f, at.y + h - ct.y - 6.0f),
+                snap.war.pool[me] >= b.cost ? ColGood : ColBad, line);
+            if (pressed)
+            {
+                if (s.targeting)
+                    s.targeting = false;
+                else if (ready)
+                {
+                    s.targeting = true;
+                    SetStatus("Click where the mortars should land. Right click cancels.", ColWarn);
+                }
+                else
+                    SetStatus(b.cooldownLeft > 0.0f ? "The mortars are reloading." : "Not enough supplies for a barrage.", ColWarn);
+            }
+        }
+    }
+    ImGui::End();
+}
+
+// The war's options, from the top bar's Options button.
+void DrawOptions()
+{
+    State& s = St();
+    if (!s.optionsOpen)
+        return;
+    const ImGuiIO& io = ImGui::GetIO();
+    if (BeginPanel("##conquest_options", ImVec2(io.DisplaySize.x * 0.5f, 96.0f), ImVec2(0.5f, 0.0f)))
+    {
+        Heading("OPTIONS");
+        ImGui::Spacing();
+        Options o = GetOptions();
+        bool changed = false;
+        Label(Font().body, 13.0f, ColMuted, "Fog of war");
+        changed |= ImGui::RadioButton("Contacts: enemies only as your side knows them", o.fog == FogMode::Contacts) &&
+                   (o.fog = FogMode::Contacts, true);
+        changed |= ImGui::RadioButton("Shroud: unexplored ground stays black", o.fog == FogMode::Shroud) &&
+                   (o.fog = FogMode::Shroud, true);
+        ImGui::Spacing();
+        changed |= ImGui::Checkbox("Taking control of soldiers", &o.possession);
+        changed |= ImGui::Checkbox("HQ radios its orders when you are not in command", &o.hqRadio);
+        if (changed)
+            SetOptions(o);
+        ImGui::Spacing();
+        if (ImGui::Button("Close"))
+            s.optionsOpen = false;
+    }
+    ImGui::End();
+}
+
+// The mission's opening screen (CfgConquest setup = 1): which side, how to start, the options.
+void DrawSetup()
+{
+    State& s = St();
+    const ImGuiIO& io = ImGui::GetIO();
+    ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0.0f, 0.0f), io.DisplaySize, IM_COL32(6, 9, 13, 170));
+    static Options o;
+    static bool initialised = false;
+    if (!initialised)
+    {
+        o = GetOptions();
+        initialised = true;
+    }
+    if (BeginPanel("##conquest_setup", ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImVec2(0.5f, 0.5f)))
+    {
+        Label(Font().display, 30.0f, ColText, "CONQUEST");
+        Label(Font().body, 14.0f, ColMuted, "Take the towns' command posts. The side whose war score runs out loses.");
+        ImGui::Spacing();
+        ImGui::Spacing();
+        Heading("YOUR SIDE");
+        ImGui::Spacing();
+        const std::vector<std::string> sides = SideNames();
+        for (size_t i = 0; i < sides.size(); i++)
+        {
+            if (i)
+                ImGui::SameLine(0.0f, 12.0f);
+            ImGui::PushID(static_cast<int>(i));
+            const ImVec2 at = ImGui::GetCursorScreenPos();
+            const ImVec2 size(200.0f, 76.0f);
+            if (ImGui::InvisibleButton("side", size))
+                o.side = static_cast<int>(i);
+            const bool chosen = o.side == static_cast<int>(i);
+            const bool hovered = ImGui::IsItemHovered();
+            ImDrawList* draw = ImGui::GetWindowDrawList();
+            const ImU32 colour = SideColour(static_cast<int>(i));
+            draw->AddRectFilled(at, ImVec2(at.x + size.x, at.y + size.y),
+                                chosen ? WithAlpha(colour, 0.35f) : hovered ? ColCardHover : ColCard, 12.0f);
+            draw->AddRect(at, ImVec2(at.x + size.x, at.y + size.y), WithAlpha(colour, chosen ? 1.0f : 0.4f), 12.0f, 0,
+                          chosen ? 2.5f : 1.0f);
+            const std::string title = SideTitle(static_cast<int>(i));
+            Put(draw, Font().display, 24.0f, ImVec2(at.x + 16.0f, at.y + 12.0f), ColText, title.c_str());
+            Put(draw, Font().body, 13.0f, ImVec2(at.x + 16.0f, at.y + 46.0f), ColMuted,
+                sides[i] == "WEST" ? "US Army" : sides[i] == "EAST" ? "Soviet Army" : "Resistance");
+            ImGui::PopID();
+        }
+        ImGui::Spacing();
+        ImGui::Spacing();
+        Heading("START");
+        ImGui::Spacing();
+        if (ImGui::RadioButton("As a squad leader on the ground", !o.startInCommand))
+            o.startInCommand = false;
+        if (ImGui::RadioButton("In command, from above", o.startInCommand && o.commanderView))
+        {
+            o.startInCommand = true;
+            o.commanderView = true;
+        }
+        ImGui::Spacing();
+        Heading("OPTIONS");
+        ImGui::Spacing();
+        if (ImGui::Checkbox("Commander view (Ctrl+M: the top-down strategy view)", &o.commanderView) && !o.commanderView)
+            o.startInCommand = false;
+        Label(Font().body, 13.0f, ColMuted, "Fog of war");
+        if (ImGui::RadioButton("Contacts: enemies only as your side knows them", o.fog == FogMode::Contacts))
+            o.fog = FogMode::Contacts;
+        if (ImGui::RadioButton("Shroud: unexplored ground stays black", o.fog == FogMode::Shroud))
+            o.fog = FogMode::Shroud;
+        ImGui::Checkbox("Taking control of any of your soldiers", &o.possession);
+        ImGui::Checkbox("HQ radios its orders", &o.hqRadio);
+        ImGui::Spacing();
+        ImGui::Spacing();
+        ImGui::PushStyleColor(ImGuiCol_Button, SideColour(o.side, 0.85f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, SideColour(o.side, 1.0f));
+        ImGui::PushFont(Pick(Font().display), 20.0f);
+        if (ImGui::Button("   Start the war   "))
+        {
+            if (BeginWar(o))
+            {
+                initialised = false;
+                s.setupGrab = false;
+                if (GEngine)
+                    GEngine->SetMouseGrab(true);
+                SDL_HideCursor();
+            }
+        }
+        ImGui::PopFont();
+        ImGui::PopStyleColor(2);
     }
     ImGui::End();
 }
@@ -1246,7 +1775,7 @@ void DrawCommandBar(const std::vector<SquadDraw>& squads)
             if (PossessionAllowed())
             {
                 ImGui::SameLine(0.0f, 18.0f);
-                if (ImGui::Button("Take control"))
+                if (ImGui::Button(s.unit ? "Take control of this soldier" : "Take control of the leader"))
                     TakeControl();
             }
             ImGui::SameLine(0.0f, 8.0f);
@@ -1260,11 +1789,13 @@ void DrawCommandBar(const std::vector<SquadDraw>& squads)
         ImGui::SameLine(0.0f, 16.0f);
         KeyCap(draw, "RMB", "Order");
         ImGui::SameLine(0.0f, 16.0f);
-        KeyCap(draw, "WASD", "Move view");
+        KeyCap(draw, "WASD / Ctrl+drag", "Move view");
         ImGui::SameLine(0.0f, 16.0f);
         KeyCap(draw, "Wheel", "Zoom");
         ImGui::SameLine(0.0f, 16.0f);
         KeyCap(draw, "Q E", "Turn");
+        ImGui::SameLine(0.0f, 16.0f);
+        KeyCap(draw, "R F", "Tilt");
         ImGui::SameLine(0.0f, 16.0f);
         KeyCap(draw, "Ctrl M", PossessionAllowed() ? "Leave command / back to command" : "Leave command");
     }
@@ -1285,7 +1816,7 @@ void SetActive(bool active)
         return;
     if (active)
     {
-        if (!GWorld || !GLandscape || !GEngine || PlayerSide() == NoSide)
+        if (!GWorld || !GLandscape || !GEngine || PlayerSide() == NoSide || !GetOptions().commanderView)
             return;
         // Back from a soldier the player had taken over: that soldier returns to the AI.
         if (Possessing())
@@ -1323,7 +1854,10 @@ void SetActive(bool active)
         GEngine->SetMouseGrab(true);
     SDL_HideCursor();
     s.selected.clear();
-    s.boxDrag = s.rotating = false;
+    s.unit = nullptr;
+    s.follow = nullptr;
+    s.boxDrag = s.rotating = s.dragPan = s.targeting = false;
+    s.optionsOpen = false;
     s.active = false;
     SetHumanCommander(false);
     LOG_INFO(Mission, "Conquest: commander view off");
@@ -1336,10 +1870,36 @@ bool ProcessEvent(const SDL_Event& event)
     // The HUD's typefaces, loaded between frames (here) rather than inside one.
     if (!Font().tried && PlayerSide() != NoSide)
         LoadFonts();
+    // The setup screen: the mouse is the screen's, the keyboard too (Esc still opens the menu).
+    if (SetupPending())
+    {
+        if (!Font().tried)
+            LoadFonts();
+        if (MenuOpen())
+            return false;
+        if ((event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP) &&
+            event.key.scancode == SDL_SCANCODE_ESCAPE)
+            return false;
+        switch (event.type)
+        {
+            case SDL_EVENT_KEY_DOWN:
+            case SDL_EVENT_KEY_UP:
+                s.consumeKeyboard = true;
+                return true;
+            case SDL_EVENT_MOUSE_MOTION:
+            case SDL_EVENT_MOUSE_WHEEL:
+            case SDL_EVENT_MOUSE_BUTTON_DOWN:
+            case SDL_EVENT_MOUSE_BUTTON_UP:
+                s.consumeMouse = true;
+                return true;
+            default:
+                return false;
+        }
+    }
     if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.scancode == SDL_SCANCODE_M &&
         (event.key.mod & SDL_KMOD_CTRL) != 0)
     {
-        if (s.active || PlayerSide() != NoSide)
+        if (s.active || (PlayerSide() != NoSide && GetOptions().commanderView))
         {
             SetActive(!s.active);
             s.consumeKeyboard = true;
@@ -1358,7 +1918,18 @@ bool ProcessEvent(const SDL_Event& event)
         case SDL_EVENT_KEY_DOWN:
         case SDL_EVENT_KEY_UP:
             if (event.key.scancode == SDL_SCANCODE_ESCAPE)
+            {
+                if (s.targeting && event.type == SDL_EVENT_KEY_DOWN)
+                {
+                    s.targeting = false; // Esc cancels the barrage before it opens the menu
+                    s.consumeKeyboard = true;
+                    return true;
+                }
                 return false;
+            }
+            if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.scancode == SDL_SCANCODE_T &&
+                PossessionAllowed() && !s.selected.empty())
+                TakeControl();
             s.consumeKeyboard = true;
             return true;
         case SDL_EVENT_MOUSE_MOTION:
@@ -1366,7 +1937,16 @@ bool ProcessEvent(const SDL_Event& event)
             if (s.rotating)
             {
                 s.yaw += event.motion.xrel * 0.006f;
-                s.pitch = std::clamp(s.pitch - event.motion.yrel * 0.25f, 20.0f, 88.0f);
+                s.pitch = std::clamp(s.pitch - event.motion.yrel * 0.25f, MinPitch, MaxPitch);
+            }
+            if (s.dragPan)
+            {
+                // The ground follows the pointer: drag forward and the view moves forward.
+                const float k = MetresPerPixel();
+                const float ahead = event.motion.yrel * k, aside = -event.motion.xrel * k;
+                s.focusX += std::sin(s.yaw) * ahead + std::cos(s.yaw) * aside;
+                s.focusY += std::cos(s.yaw) * ahead - std::sin(s.yaw) * aside;
+                s.follow = nullptr;
             }
             return true;
         case SDL_EVENT_MOUSE_WHEEL:
@@ -1374,7 +1954,9 @@ bool ProcessEvent(const SDL_Event& event)
             if (!overHud && event.wheel.y != 0.0f)
             {
                 const float steps = event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -event.wheel.y : event.wheel.y;
-                s.distance = std::clamp(s.distance * std::pow(0.87f, steps), MinDistance, MaxDistance);
+                EntityAI* followed = s.follow;
+                const float floor = followed ? std::max(FollowMinDistance, followed->GetRadius() * 1.1f) : MinDistance;
+                s.distance = std::clamp(s.distance * std::pow(0.85f, steps), floor, MaxDistance);
             }
             return true;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
@@ -1383,20 +1965,37 @@ bool ProcessEvent(const SDL_Event& event)
                 return true;
             if (event.button.button == SDL_BUTTON_LEFT)
             {
-                s.boxDrag = true;
-                s.boxX0 = event.button.x;
-                s.boxY0 = event.button.y;
+                if (s.targeting)
+                    FireBarrageAt(event.button.x, event.button.y);
+                else if ((SDL_GetModState() & SDL_KMOD_CTRL) != 0)
+                    s.dragPan = true;
+                else
+                {
+                    s.boxDrag = true;
+                    s.boxX0 = event.button.x;
+                    s.boxY0 = event.button.y;
+                }
             }
             else if (event.button.button == SDL_BUTTON_MIDDLE)
                 s.rotating = true;
             else if (event.button.button == SDL_BUTTON_RIGHT)
-                OrderAt(event.button.x, event.button.y);
+            {
+                if (s.targeting)
+                {
+                    s.targeting = false;
+                    SetStatus("Barrage cancelled.", ColMuted);
+                }
+                else
+                    OrderAt(event.button.x, event.button.y);
+            }
             return true;
         case SDL_EVENT_MOUSE_BUTTON_UP:
             s.consumeMouse = true;
-            if (event.button.button == SDL_BUTTON_LEFT && s.boxDrag)
+            if (event.button.button == SDL_BUTTON_LEFT && s.dragPan)
+                s.dragPan = false;
+            else if (event.button.button == SDL_BUTTON_LEFT && s.boxDrag)
             {
-                const bool add = (SDL_GetModState() & (SDL_KMOD_SHIFT | SDL_KMOD_CTRL)) != 0;
+                const bool add = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
                 if (std::abs(event.button.x - s.boxX0) < 6.0f && std::abs(event.button.y - s.boxY0) < 6.0f)
                     ClickSelect(event.button.x, event.button.y, add);
                 else
@@ -1417,9 +2016,43 @@ void PrepareFonts()
     LoadFonts();
 }
 
+bool PlaceCamera(float x, float y, float distance, float pitch, float yawDegrees)
+{
+    State& s = St();
+    if (!s.active)
+        return false;
+    FocusOn(x, y);
+    s.distance = std::clamp(distance, MinDistance, MaxDistance);
+    s.pitch = std::clamp(pitch, MinPitch, MaxPitch);
+    s.yaw = yawDegrees * Pi / 180.0f;
+    return true;
+}
+
+bool FollowSquad(int groupId, float distance, float pitch)
+{
+    State& s = St();
+    if (!s.active)
+        return false;
+    bool found = false;
+    ForEachGroup(
+        [&](const LiveGroup& g)
+        {
+            if (g.id != groupId || found || !g.group->Leader())
+                return;
+            found = true;
+            s.selected = {groupId};
+            s.unit = g.group->Leader()->GetPerson();
+            AIUnit* leader = g.group->Leader();
+            s.follow = leader->IsFreeSoldier() ? static_cast<EntityAI*>(leader->GetPerson()) : leader->GetVehicle();
+        });
+    s.distance = std::clamp(distance, FollowMinDistance, MaxDistance);
+    s.pitch = std::clamp(pitch, MinPitch, MaxPitch);
+    return found;
+}
+
 bool WantsMouse()
 {
-    return St().active && St().consumeMouse;
+    return (St().active || SetupPending()) && St().consumeMouse;
 }
 
 bool WantsKeyboard()
@@ -1430,15 +2063,32 @@ bool WantsKeyboard()
 void Frame()
 {
     State& s = St();
-    // The soldier the commander had taken over died: back to the commander view.
-    if (TakeReopenViewRequest() && !s.active)
+    // The setup screen comes first: nothing of the war exists before its Start.
+    if (SetupPending())
+    {
+        if (!Font().tried || MenuOpen())
+            return;
+        if (!s.setupGrab && GEngine)
+        {
+            GEngine->SetMouseGrab(false);
+            SDL_ShowCursor();
+            s.setupGrab = true;
+        }
+        PushTheme();
+        DrawSetup();
+        PopTheme();
+        return;
+    }
+    // The war began in command, or the soldier the commander had taken over died: the view opens.
+    if (std::string notice; TakeViewRequest(notice) && !s.active)
     {
         SetActive(true);
-        SetStatus("The soldier you controlled was killed. You are back in command.", ColWarn);
+        if (!notice.empty())
+            SetStatus(notice, notice.find("killed") != std::string::npos ? ColWarn : ColGood);
     }
     if (!s.active)
     {
-        // The soldier's HUD: the war bar, the capture bar in a zone, capture banners.
+        // The soldier's HUD: the war bar, HQ's order, the capture bar at a post, banners.
         const Snapshot& snap = GetSnapshot();
         if (snap.active && PlayerSide() != NoSide && Font().tried && !MenuOpen())
         {
@@ -1459,7 +2109,7 @@ void Frame()
         Pan(dt);
     ApplyCamera();
 
-    // Forget squads that no longer exist.
+    // Forget squads (and a picked soldier) that no longer exist.
     std::vector<SquadDraw> squads = CollectSquads();
     s.selected.erase(std::remove_if(s.selected.begin(), s.selected.end(),
                                     [&](int id)
@@ -1468,8 +2118,11 @@ void Frame()
                                                             [id](const SquadDraw& d) { return d.group.id == id; });
                                     }),
                      s.selected.end());
+    if (Person* picked = s.unit; picked && (!picked->Brain() || picked->Brain()->GetLifeState() != AIUnit::LSAlive))
+        s.unit = nullptr;
 
     ImDrawList* draw = ImGui::GetBackgroundDrawList();
+    DrawShroud(draw);
     DrawObjectives(draw);
     DrawContacts(draw);
     DrawSquads(draw, squads);
@@ -1485,6 +2138,7 @@ void Frame()
     DrawSquadList(snap, squads);
     DrawDeploy(snap);
     DrawCommandBar(squads);
+    DrawOptions();
     DrawToast();
     PopTheme();
 }
@@ -1498,7 +2152,23 @@ static GameValue ConquestCommanderViewUnary(const GameState*, GameValuePar oper1
     return GameValue(Poseidon::Conquest::View::Active());
 }
 
+// conquestCamera [x, y, distance, pitch, yaw] or [groupId, distance, pitch]: place the commander
+// view's camera, or follow a squad's leader (captures, the feature test).
+static GameValue ConquestCameraUnary(const GameState*, GameValuePar oper1)
+{
+    namespace V = Poseidon::Conquest::View;
+    const GameArrayType& a = oper1;
+    if (!V::Active() || a.Size() < 3)
+        return GameValue(false);
+    if (a.Size() >= 5)
+        return GameValue(V::PlaceCamera(static_cast<float>(a[0]), static_cast<float>(a[1]), static_cast<float>(a[2]),
+                                        static_cast<float>(a[3]), static_cast<float>(a[4])));
+    return GameValue(V::FollowSquad(static_cast<int>(static_cast<float>(a[0])), static_cast<float>(a[1]),
+                                    static_cast<float>(a[2])));
+}
+
 INIT_MODULE(ConquestView, 3)
 {
+    GGameState.NewFunction(GameFunction(GameBool, "conquestCamera", ConquestCameraUnary, GameArray));
     GGameState.NewFunction(GameFunction(GameBool, "conquestCommanderView", ConquestCommanderViewUnary, GameBool));
 };

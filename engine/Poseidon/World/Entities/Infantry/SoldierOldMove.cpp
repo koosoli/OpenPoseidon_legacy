@@ -9,6 +9,7 @@
 #include <Poseidon/World/Weather/SandField.hpp>
 #include <Poseidon/World/Entities/Infantry/GroundBootEvents.hpp>
 #include <Poseidon/Core/Application.hpp>
+#include <Poseidon/Game/Conquest/ConquestReferee.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <limits.h>
 #include <stdio.h>
@@ -1256,6 +1257,10 @@ void Man::KilledBy(EntityAI* owner)
         default:
             Fail("Respawn mode");
         case RespawnNone:
+            // Conquest: the war goes on while the player's side has soldiers -- the player continues in
+            // command or in another soldier, and the game's death camera (onPlayerKilled.sqs) must not run.
+            if (player && GWorld->GetMode() != GModeNetware && Poseidon::Conquest::OnRealPlayerDead())
+                break;
             if (player)
             {
                 if (GWorld->GetMode() != GModeNetware)
