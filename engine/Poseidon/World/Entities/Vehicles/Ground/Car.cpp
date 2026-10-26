@@ -2357,6 +2357,35 @@ bool Car::FireWeapon(int weapon, TargetType* target)
                                  shootTrans.Rotate(Type()->_turret._dir), target);
             }
             break;
+            // An Arma 1/2 car's own gunner weapon can be a grenade launcher (MK19, AGS-30: shells)
+            // or an anti-tank launcher (the BRDM-2 ATGM, the Avenger, a TOW HMMWV); CWA's cars
+            // only ever carried machine guns, so these failed "Unknown ammo used" (Arma 2
+            // vehicle test, SP_BenchmarkBattle: 207 times). They leave the gun like a tank's.
+            case AmmoShotShell:
+            {
+                Matrix4Val shootTrans = GunTurretTransform();
+                fired = FireShell(weapon, shootTrans.FastTransform(Type()->_turret._pos),
+                                  shootTrans.Rotate(Type()->_turret._dir), target);
+            }
+            break;
+            case AmmoShotMissile:
+            {
+                Matrix4Val shootTrans = GunTurretTransform();
+                fired = FireMissile(weapon, shootTrans.FastTransform(Type()->_turret._pos),
+                                    shootTrans.Rotate(Type()->_turret._dir), shootTrans.Rotate(Vector3(0, 1, 20)),
+                                    target);
+            }
+            break;
+            case AmmoShotRocket:
+            {
+                // unguided: leaves along the barrel at the magazine's muzzle velocity
+                Matrix4Val shootTrans = GunTurretTransform();
+                const MagazineType* mType = GetMagazineSlot(weapon)._magazine->_type;
+                const Vector3 dir = shootTrans.Rotate(Type()->_turret._dir);
+                fired = FireMissile(weapon, shootTrans.FastTransform(Type()->_turret._pos), dir,
+                                    dir * (mType ? mType->_initSpeed : 20.0f), target);
+            }
+            break;
             case AmmoNone:
                 break;
             default:

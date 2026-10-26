@@ -1420,6 +1420,7 @@ std::string Arma1AmmoClass(const std::string& a1Ammo, const std::string& cwaAmmo
     {
         static const char* const lists[][2] = {
             {"hitGround", "hitGroundSoft"}, {"hitMan", "hitMan"}, {"hitArmor", "hitArmor"}, {"hitBuilding", "hitBuilding"}};
+        std::set<std::string> written; // a sample several lists name is written once (run 46: "soundHit: Member already defined")
         for (const auto& [cwaKey, a2Key] : lists)
         {
             const ParamEntry* list = a1->FindEntry(a2Key);
@@ -1434,7 +1435,8 @@ std::string Arma1AmmoClass(const std::string& a1Ammo, const std::string& cwaAmmo
                 if (triple.empty())
                     continue;
                 const std::string own = "a2_" + sample;
-                samples += "\t\t" + own + "[]={" + triple + "};\r\n";
+                if (written.insert(Lower(own)).second)
+                    samples += "\t\t" + own + "[]={" + triple + "};\r\n";
                 char prob[32];
                 std::snprintf(prob, sizeof(prob), ",%g", (float)(*list)[i + 1]);
                 entries += std::string(n++ ? "," : "") + "\"" + own + "\"" + prob;
