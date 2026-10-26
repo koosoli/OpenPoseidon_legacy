@@ -3049,6 +3049,13 @@ impl Sky {
         self.linear > 0.5 && (sky.cloud0[0] > 0.001 || earth_aerial)
     }
 
+    /// Whether every cloud lies beyond the sea's surface from this camera: below half the deck's
+    /// base no ray meets cloud before a wave, so lib.rs composites the clouds before the water.
+    /// Not for the whole world (its planet clouds and the air in front of the globe).
+    pub fn clouds_behind_water(&self, sky: &WgrSky) -> bool {
+        sky.cloud4[3] <= 0.5 && sky.night_zenith[3] < sky.cloud0[2] * 0.5
+    }
+
     pub fn cloud_temporal_view(&self) -> Option<&wgpu::TextureView> {
         self.cloud_temporal_view.as_ref()
     }

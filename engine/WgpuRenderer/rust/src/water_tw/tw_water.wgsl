@@ -37,16 +37,19 @@
 
 const FFT_SIZE: f32 = 256.0;
 const CASCADES: i32 = 4;
-// SEA-GLINTS: the share of the sun lobe the facets carry (the rest stays the smooth highlight),
-// the finest facet cell (m), a facet's glint tolerance in units of the slope spread, its radius in cells.
-// Tuned so a glint peaks near 6x the smooth highlight: sparser, brighter glints (20x and more) were
-// clipped white by the tone curve and took ~15% of the path's brightness with them.
-const GLINT_SHARE: f32 = 0.6;
+// SEA-GLINTS: sparkles ADDED to the whole smooth highlight (owner, 2026-10-26: "i can no really see
+// much glitter"). The energy-conserving version took GLINT_SHARE of the lobe from every pixel and gave
+// it back to the few a facet lit, which at any share read as the path dimmed and etched with dark
+// rims, not as glitter. Now: the finest facet cell (m), a facet's glint tolerance in units of the
+// capillary slope spread, its radius in cells, a glint's peak over the smooth path's own peak (above 1
+// the tone curve clips it white, as the eye sees the sun in a facet), and the capillary slope spread
+// floor: facets are tilted by ripples finer than the resolved waves, so the sparkles spread past the
+// smooth path into a halo round it.
 const GLINT_CELL: f32 = 0.05;
-const GLINT_TOL: f32 = 0.5;
-const GLINT_RADIUS: f32 = 0.4;
-// the brightest a glint may get, in units of the smooth highlight (half-float range)
-const GLINT_CAP: f32 = 30.0;
+const GLINT_TOL: f32 = 0.4;
+const GLINT_RADIUS: f32 = 0.35;
+const GLINT_PEAK: f32 = 8.0;
+const GLINT_CAPILLARY: f32 = 0.09;
 // integer hashes (Jarzynski & Olano 2020, pcg3d / pcg4d): a handful of integer ops where the
 // sin-based hash cost a sin each, and a facet needs eleven random numbers
 fn glintPcg3(v0: vec3<u32>) -> vec3<f32> {
@@ -64,8 +67,8 @@ fn glintPcg4(v0: vec4<u32>) -> vec4<f32> {
     return vec4<f32>(v >> vec4<u32>(8u)) * (1.0 / 16777216.0);
 }
 const GLINT_RATE: f32 = 3.0;
-// the glint of the facet in this pixel's cell of size `cell` (octave `lvl`), over its expected
-// value: `need` is the tilt that mirrors the sun, `sig` the facets' slope spread, `fp` the footprint (m)
+// the glint of the facet in this pixel's cell of size `cell` (octave `lvl`), 0..1: `need` is the
+// tilt that mirrors the sun, `sig` the facets' slope spread, `fp` the footprint (m)
 fn glintFacet(xz: vec2<f32>, cell: f32, lvl: u32, need: vec2<f32>, sig: f32, fp: f32) -> f32 {
     let cf = floor(xz / cell);
     let cu = bitcast<vec2<u32>>(vec2<i32>(cf));
@@ -88,18 +91,8 @@ fn glintFacet(xz: vec2<f32>, cell: f32, lvl: u32, need: vec2<f32>, sig: f32, fp:
     let tilt = mix(d0, d1, tf) / sqrt((1.0 - tf) * (1.0 - tf) + tf * tf);
     let tau = GLINT_TOL * sig;
     let off = tilt * sig - need;
-    let w = exp(-dot(off, off) / (2.0 * tau * tau));
-    // expected glint at this `need` over the random tilt: the facet-tilt Gaussian (sig) convolved
-    // with the tolerance (tau); times the disc's expected cover of a pixel. Dividing by it keeps the
-    // smooth lobe's mean wherever the lobe is.
-    let e2 = sig * sig + tau * tau;
-    let ew = tau * tau / e2 * exp(-dot(need, need) / (2.0 * e2));
-    // the disc's expected cover of a pixel is its area share pi r^2 / cell^2 whatever the footprint
-    // (spreading the disc over the pixel moves its area, it does not add any): a Monte Carlo of `cover`
-    // gives 0.50-0.52 for footprints up to 0.75 cell. The earlier pi (r + fp/4)^2 grew with the
-    // footprint and left the far glitter path up to half too dark.
-    let ec = 3.14159265 * r * r / (cell * cell);
-    return min(w * cover / max(ew * ec, 1e-4), GLINT_CAP);
+    // how well the facet mirrors the sun into the eye, times the share of the pixel it covers
+    return exp(-dot(off, off) / (2.0 * tau * tau)) * cover;
 }
 
 override linear: f32 = 1.0;
@@ -1129,19 +1122,30 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         // (lagXZ), not to the screen: sparkles ride the waves and twinkle instead of re-rolling per
         // pixel, which DLSS averaged into nothing.
         var sunSpec = sunLight * min(spec, 400.0);
-        if (spec > 0.05) {
-            let sig = sqrt(max(alpha2, 1e-5) * 0.5);                  // per-axis facet slope spread
-            // the facet tilt that mirrors the sun, in a world-stable frame about the shading normal
-            let t1 = normalize(vec3<f32>(1.0, 0.0, 0.0) - N * N.x);
-            let t2 = cross(N, t1);
-            let hN = max(dot(H, N), 1e-3);
-            let need = vec2<f32>(dot(H, t1), dot(H, t2)) / hN;
+        // facet slopes: the resolved roughness and the capillaries under it
+        let sig = sqrt(max(alpha2, 1e-5) * 0.5 + GLINT_CAPILLARY * GLINT_CAPILLARY);
+        // the facet tilt that mirrors the sun, in a world-stable frame about the shading normal
+        let t1 = normalize(vec3<f32>(1.0, 0.0, 0.0) - N * N.x);
+        let t2 = cross(N, t1);
+        let hN = max(dot(H, N), 1e-3);
+        let need = vec2<f32>(dot(H, t1), dot(H, t2)) / hN;
+        // past 2.5 spreads hardly a facet mirrors the sun (one in ~80)
+        if (dot(need, need) < 6.25 * sig * sig && NdL > 0.0) {
             let lod = max(log2(footprint * 1.5 / GLINT_CELL), 0.0);
             let l0 = floor(lod);
-            let g0 = glintFacet(lagXZ, GLINT_CELL * exp2(l0), u32(l0), need, sig, footprint);
-            let g1 = glintFacet(lagXZ, GLINT_CELL * exp2(l0 + 1.0), u32(l0) + 1u, need, sig, footprint);
-            let g = mix(g0, g1, lod - l0);
-            sunSpec = min(sunSpec * mix(1.0, g, GLINT_SHARE), vec3<f32>(30000.0));
+            // one facet octave, two only across the middle of the step between them
+            let k = smoothstep(0.3, 0.7, lod - l0);
+            var g = 0.0;
+            if (k < 1.0) {
+                g = glintFacet(lagXZ, GLINT_CELL * exp2(l0), u32(l0), need, sig, footprint) * (1.0 - k);
+            }
+            if (k > 0.0) {
+                g += glintFacet(lagXZ, GLINT_CELL * exp2(l0 + 1.0), u32(l0) + 1u, need, sig, footprint) * k;
+            }
+            // a glint: GLINT_PEAK times the smooth path's peak (the GGX lobe at NdH = 1), Fresnel at
+            // the mirror angle; faded in over the first light of day like the lobe
+            let peak = _waterDGGX(1.0, alpha2) * _waterVSmithGGX(NdL, NdV, alpha2) * Fs * NdL;
+            sunSpec = min(sunSpec + sunLight * (g * GLINT_PEAK * min(peak, 400.0)), vec3<f32>(30000.0));
         }
 #else
         let sunSpec = sunLight * min(spec, 400.0);
