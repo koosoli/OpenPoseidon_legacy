@@ -23,6 +23,7 @@
 #include <vector>
 
 class ParamArchive;
+class GameValue;
 
 namespace Poseidon
 {
@@ -211,5 +212,9 @@ struct PlayerOrder
     float x = 0.0f, y = 0.0f;
 };
 PlayerOrder CurrentPlayerOrder();
+
+/// Multiplayer: a client's commander action ([player, kind, args]), run on the server through
+/// `remoteExec ["conquestRequest", 2]`.
+void HandleNetRequest(const GameValue& value);
 
 } // namespace Poseidon::Conquest
