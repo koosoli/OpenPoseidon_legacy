@@ -269,8 +269,8 @@ off went to the main session to merge and deploy; this section supersedes the st
 | Fire light volume / smooth flames / multigrid | Built, **off** (little visible difference) | `claude/fire-multigrid` | `WGR_FIRE_LIGHT/SMOOTH/MG=1` |
 | Two-stage whitecaps | Built, **off**, not recommended | `claude/look-pack` | `WGR_TW_FOAM2=1` |
 | Lens film and drops | **Dropped** (owner) | removed | n/a |
-| Hydrodynamic modulation | Built, **off**, awaiting the owner's in-game look. Equal cost (water draw, lowest samples of two rounds: 0.58 / 0.57 ms caps view, 0.75 / 0.72 ms sun view). The sun path breaks up on the crests and the troughs stay glassier. | `claude/look-pack` | `WGR_SEA_HYDRO=1` |
-| Downwind froth smear | Built, **off**, awaiting the owner's in-game look. Equal cost (0.58 / 0.56 and 0.75 / 0.75 ms). Barely visible in stills; a cap's trail reads in motion, if at all. | `claude/look-pack` | `WGR_SEA_SMEAR=1` |
+| Hydrodynamic modulation | **Default on** (owner: almost no visible difference, kept because it costs nothing). Equal cost (water draw, lowest samples of two rounds: 0.58 / 0.57 ms caps view, 0.75 / 0.72 ms sun view). The sun path breaks up on the crests and the troughs stay glassier. | `claude/look-pack` | Dev tools > Water > "TW crest bunching"; `WGR_SEA_HYDRO=0` compiles it out |
+| Downwind froth smear | **Default on** (signed off in a live in-game A/B). Equal cost (0.58 / 0.56 and 0.75 / 0.75 ms). Barely visible in stills; a cap's trail reads in motion, if at all. | `claude/look-pack` | Dev tools > Water > "TW froth smear"; `WGR_SEA_SMEAR=0` compiles it out |
 
 ### What the owner's reports turned out to be
 
