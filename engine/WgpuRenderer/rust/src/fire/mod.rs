@@ -38,6 +38,32 @@ const WRECK_Z: u32 = 48;
 /// below this wind (m/s) a plume rises: the upright box
 const PLUME_WIND: f32 = 0.8;
 const JACOBI: u32 = 24;
+/// FIRE-MG: WGR_FIRE_MG=N solves the pressure with N multigrid V-cycles (fire_sim.wgsl cs_mg_*)
+/// instead of the JACOBI sweeps; 0 or unset keeps the Jacobi solve. One V(2,2) cycle costs about
+/// seven fine-grid sweeps against the Jacobi solve's 24 and removes the large-scale error Jacobi
+/// leaves behind.
+/// FIRE-LIGHT (WGR_FIRE_LIGHT=1): each box keeps a half-resolution light volume (fire_sim.wgsl
+/// cs_light) rebuilt after every step; the march reads its smoke shadows from it in one fetch
+/// instead of marching toward the sun and the sky per sample, and lights the smoke with the
+/// flames' own glow. Off by default until the owner picks it from A/B captures.
+fn fire_light_enabled() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_FIRE_LIGHT").as_deref() == Ok("1"))
+}
+
+/// FIRE-SMOOTH (WGR_FIRE_SMOOTH=1): the march reconstructs the field with a cubic B-spline where a
+/// sample shows flame (fire_march.wgsl fieldAtCubic): no banding across the flames. Off by default.
+fn fire_smooth_enabled() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_FIRE_SMOOTH").as_deref() == Ok("1"))
+}
+
+fn mg_cycles() -> u32 {
+    static V: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_FIRE_MG").ok().and_then(|v| v.trim().parse::<u32>().ok()).unwrap_or(0).min(4))
+}
+/// sweeps on the coarsest multigrid level (a few hundred cells)
+const MG_COARSE_SWEEPS: u32 = 8;
 const STEP: f32 = 1.0 / 60.0;
 /// How long a smoke-only plume's box keeps the smoke in the air after its source stops (seconds;
 /// WGR_FIRE_SMOKE_LINGER). The 2001 puffs a smoke grenade drops live their cloudletDuration after it
@@ -101,6 +127,8 @@ struct SimParams {
     /// FIRE-002: the share of the smoke that comes out grey rather than the box's colour --
     /// x: mean, y: how far it swings, patchy in space and time (fire_sim.wgsl cs_evolve)
     tint: [f32; 4],
+    /// FIRE-LIGHT: the direction to the sun in the box's frame
+    light: [f32; 4],
     floor: [[f32; 4]; 25],
     ceiling: [[f32; 4]; 25],
 }
@@ -153,7 +181,8 @@ fn make_tex(device: &wgpu::Device, label: &str, format: wgpu::TextureFormat, siz
         sample_count: 1,
         dimension: wgpu::TextureDimension::D3,
         format,
-        usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+        // COPY_*: the pressure-solve test writes a right-hand side and reads the result back
+        usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
     let v = t.create_view(&wgpu::TextureViewDescriptor {
@@ -161,6 +190,39 @@ fn make_tex(device: &wgpu::Device, label: &str, format: wgpu::TextureFormat, siz
         ..Default::default()
     });
     (t, v)
+}
+
+/// Halve the box while every side stays even and at least 3 cells (40x72x40 -> 20x36x20 ->
+/// 10x18x10 -> 5x9x5), at most three coarse levels.
+fn mg_dims(size: (u32, u32, u32)) -> Vec<(u32, u32, u32)> {
+    let mut out = Vec::new();
+    let mut d = size;
+    while out.len() < 3 && d.0 % 2 == 0 && d.1 % 2 == 0 && d.2 % 2 == 0 && d.0.min(d.1).min(d.2) >= 6 {
+        d = (d.0 / 2, d.1 / 2, d.2 / 2);
+        out.push(d);
+    }
+    out
+}
+
+fn mg_levels(device: &wgpu::Device, size: (u32, u32, u32)) -> Vec<MgLevel> {
+    let r = wgpu::TextureFormat::R32Float;
+    mg_dims(size)
+        .into_iter()
+        .map(|d| MgLevel {
+            e: [make_tex(device, "wgr_fire_mg_e_a", r, d), make_tex(device, "wgr_fire_mg_e_b", r, d)],
+            rhs: make_tex(device, "wgr_fire_mg_rhs", r, d),
+            res: make_tex(device, "wgr_fire_mg_res_c", r, d),
+            groups: (d.0.div_ceil(4), d.1.div_ceil(4), d.2.div_ceil(4)),
+        })
+        .collect()
+}
+
+/// One coarse multigrid level of a box: the correction (ping-pong), its right-hand side and residual.
+struct MgLevel {
+    e: [Tex; 2],
+    rhs: Tex,
+    res: Tex,
+    groups: (u32, u32, u32),
 }
 
 struct Grid {
@@ -172,6 +234,11 @@ struct Grid {
     expansion: Tex,
     div: Tex,
     pres: [Tex; 2],
+    /// FIRE-MG: the fine residual and the coarse levels (empty unless WGR_FIRE_MG is set)
+    mg_res: Option<Tex>,
+    /// FIRE-LIGHT: the light volume at half the box's resolution (None unless WGR_FIRE_LIGHT)
+    light: Option<Tex>,
+    mg: Vec<MgLevel>,
     cur: usize,
     pcur: usize,
     params: wgpu::Buffer,
@@ -218,6 +285,14 @@ pub struct FireSystem {
     divergence: wgpu::ComputePipeline,
     jacobi: wgpu::ComputePipeline,
     project: wgpu::ComputePipeline,
+    mg_smooth: wgpu::ComputePipeline,
+    mg_residual: wgpu::ComputePipeline,
+    mg_restrict: wgpu::ComputePipeline,
+    mg_zero: wgpu::ComputePipeline,
+    mg_prolong: wgpu::ComputePipeline,
+    light: wgpu::ComputePipeline,
+    /// the direction to the sun (world) for the light volume, from the latest record()
+    sun_dir: [f32; 3],
     sampler: wgpu::Sampler,
     dummy_rgba_in: Tex,
     dummy_r_in: Tex,
@@ -386,6 +461,12 @@ impl FireSystem {
                 frag_tex(7, wgpu::TextureViewDimension::D3),
                 frag_tex(8, wgpu::TextureViewDimension::D3),
                 frag_tex(9, wgpu::TextureViewDimension::D3),
+                frag_tex(10, wgpu::TextureViewDimension::D3),
+                frag_tex(11, wgpu::TextureViewDimension::D3),
+                frag_tex(12, wgpu::TextureViewDimension::D3),
+                frag_tex(13, wgpu::TextureViewDimension::D3),
+                frag_tex(14, wgpu::TextureViewDimension::D3),
+                frag_tex(15, wgpu::TextureViewDimension::D3),
             ],
         });
         let march_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -487,6 +568,13 @@ impl FireSystem {
             divergence: cp("cs_divergence"),
             jacobi: cp("cs_jacobi"),
             project: cp("cs_project"),
+            mg_smooth: cp("cs_mg_smooth"),
+            mg_residual: cp("cs_mg_residual"),
+            mg_restrict: cp("cs_mg_restrict"),
+            mg_zero: cp("cs_mg_zero"),
+            mg_prolong: cp("cs_mg_prolong"),
+            light: cp("cs_light"),
+            sun_dir: [0.0, 1.0, 0.0],
             sim_layout,
             sampler,
             dummy_rgba_in,
@@ -632,6 +720,72 @@ impl FireSystem {
             layout: &self.sim_layout,
             entries: &entries,
         })
+    }
+
+    /// The pressure solve of one step: `cycles` multigrid V(2,2) cycles (FIRE-MG) or, with 0 or
+    /// no coarse levels, the JACOBI sweeps; warm-started from `pres[pc]`, returns the index of
+    /// the pressure buffer holding the result. `level_groups` is the dispatch size `run` uses:
+    /// set to a coarse level's while that level is solved, and back to `groups`.
+    fn solve_pressure<'g>(
+        &self,
+        g: &'g Grid,
+        mut pc: usize,
+        groups: (u32, u32, u32),
+        cycles: u32,
+        level_groups: &std::cell::Cell<(u32, u32, u32)>,
+        run: &mut dyn FnMut(&wgpu::ComputePipeline, Binds<'g>),
+    ) -> usize {
+        let none = || Binds { fields: None, vel: None, aux: None, p: None, d: None, out_rgba: None, out_r: None };
+        if let (Some(res0), false, true) = (&g.mg_res, g.mg.is_empty(), cycles > 0) {
+            // FIRE-MG: V(2,2) cycles, warm-started from the last step's pressure like the Jacobi solve
+            let last = g.mg.len() - 1;
+            let mut ec = vec![0usize; g.mg.len()];
+            for _ in 0..cycles {
+                for _ in 0..2 {
+                    run(&self.mg_smooth, Binds { p: Some(&g.pres[pc].1), d: Some(&g.div.1), out_r: Some(&g.pres[1 - pc].1), ..none() });
+                    pc = 1 - pc;
+                }
+                run(&self.mg_residual, Binds { p: Some(&g.pres[pc].1), d: Some(&g.div.1), out_r: Some(&res0.1), ..none() });
+                let mut fine_res = &res0.1;
+                for (li, lv) in g.mg.iter().enumerate() {
+                    level_groups.set(lv.groups);
+                    run(&self.mg_restrict, Binds { d: Some(fine_res), out_r: Some(&lv.rhs.1), ..none() });
+                    run(&self.mg_zero, Binds { out_r: Some(&lv.e[0].1), ..none() });
+                    ec[li] = 0;
+                    for _ in 0..if li == last { MG_COARSE_SWEEPS } else { 2 } {
+                        run(&self.mg_smooth, Binds { p: Some(&lv.e[ec[li]].1), d: Some(&lv.rhs.1), out_r: Some(&lv.e[1 - ec[li]].1), ..none() });
+                        ec[li] = 1 - ec[li];
+                    }
+                    if li < last {
+                        run(&self.mg_residual, Binds { p: Some(&lv.e[ec[li]].1), d: Some(&lv.rhs.1), out_r: Some(&lv.res.1), ..none() });
+                        fine_res = &lv.res.1;
+                    }
+                }
+                for li in (0..last).rev() {
+                    let (lv, co) = (&g.mg[li], &g.mg[li + 1]);
+                    level_groups.set(lv.groups);
+                    run(&self.mg_prolong, Binds { p: Some(&lv.e[ec[li]].1), d: Some(&co.e[ec[li + 1]].1), out_r: Some(&lv.e[1 - ec[li]].1), ..none() });
+                    ec[li] = 1 - ec[li];
+                    for _ in 0..2 {
+                        run(&self.mg_smooth, Binds { p: Some(&lv.e[ec[li]].1), d: Some(&lv.rhs.1), out_r: Some(&lv.e[1 - ec[li]].1), ..none() });
+                        ec[li] = 1 - ec[li];
+                    }
+                }
+                level_groups.set(groups);
+                run(&self.mg_prolong, Binds { p: Some(&g.pres[pc].1), d: Some(&g.mg[0].e[ec[0]].1), out_r: Some(&g.pres[1 - pc].1), ..none() });
+                pc = 1 - pc;
+                for _ in 0..2 {
+                    run(&self.mg_smooth, Binds { p: Some(&g.pres[pc].1), d: Some(&g.div.1), out_r: Some(&g.pres[1 - pc].1), ..none() });
+                    pc = 1 - pc;
+                }
+            }
+        } else {
+            for _ in 0..JACOBI {
+                run(&self.jacobi, Binds { p: Some(&g.pres[pc].1), d: Some(&g.div.1), out_r: Some(&g.pres[1 - pc].1), ..none() });
+                pc = 1 - pc;
+            }
+        }
+        pc
     }
 
     fn step_grid(&self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, gi: usize) -> (usize, usize) {
@@ -811,6 +965,12 @@ impl FireSystem {
             } else {
                 [0.0; 4]
             },
+            // FIRE-LIGHT: the sun in the box's frame (fire_march.wgsl dirToBox)
+            light: {
+                let (sn, cs) = g.yaw.sin_cos();
+                let d = self.sun_dir;
+                [d[0] * cs + d[2] * sn, d[1], -d[0] * sn + d[2] * cs, 0.0]
+            },
             floor: s.floor,
             ceiling: s.ceiling,
         };
@@ -819,11 +979,14 @@ impl FireSystem {
         let c = g.cur;
         let n = 1 - c;
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("wgr_fire_step"), timestamp_writes: None });
+        // the dispatch size: the box's, or a coarse multigrid level's while one is being solved
+        let level_groups = std::cell::Cell::new(groups);
         let mut run = |pipeline: &wgpu::ComputePipeline, b: Binds| {
             let bg = self.bind(device, &g.params, b);
             pass.set_pipeline(pipeline);
             pass.set_bind_group(0, &bg, &[]);
-            pass.dispatch_workgroups(groups.0, groups.1, groups.2);
+            let gr = level_groups.get();
+            pass.dispatch_workgroups(gr.0, gr.1, gr.2);
         };
         let none = || Binds { fields: None, vel: None, aux: None, p: None, d: None, out_rgba: None, out_r: None };
         if g.needs_clear {
@@ -864,12 +1027,15 @@ impl FireSystem {
             run(&self.clear, Binds { out_r: Some(&g.pres[pc].1), ..none() });
         } else {
             run(&self.divergence, Binds { vel: Some(&g.vel[c].1), d: Some(&g.expansion.1), out_r: Some(&g.div.1), ..none() });
-            for _ in 0..JACOBI {
-                run(&self.jacobi, Binds { p: Some(&g.pres[pc].1), d: Some(&g.div.1), out_r: Some(&g.pres[1 - pc].1), ..none() });
-                pc = 1 - pc;
-            }
+            pc = self.solve_pressure(g, pc, groups, mg_cycles(), &level_groups, &mut run);
         }
         run(&self.project, Binds { vel: Some(&g.vel[c].1), p: Some(&g.pres[pc].1), out_rgba: Some(&g.vel[n].1), ..none() });
+        if let Some(light) = &g.light {
+            // FIRE-LIGHT: the light volume from the fields this step produced
+            level_groups.set(((g.dims[0] / 2).div_ceil(4), (g.dims[1] / 2).div_ceil(4), (g.dims[2] / 2).div_ceil(4)));
+            run(&self.light, Binds { fields: Some(&g.fields[n].1), out_rgba: Some(&light.1), ..none() });
+            level_groups.set(groups);
+        }
         drop(pass);
         (n, pc)
     }
@@ -897,6 +1063,7 @@ impl FireSystem {
         let now = Instant::now();
         let dt = self.last.map_or(0.0, |l| (now - l).as_secs_f32()).min(0.25);
         self.last = Some(now);
+        self.sun_dir = sun_dir;
         self.assign(device, cam);
         // fades: a second in and out
         for g in &mut self.grids {
@@ -992,7 +1159,9 @@ impl FireSystem {
                 }
                 f
             },
-            flash_info: [self.flashes.len() as f32, 0.0, self.flash_gain * self.gain.abs(), 0.0],
+            // w: FIRE-LIGHT, the march reads the light volumes
+            // y: FIRE-SMOOTH, the cubic reconstruction in the flames
+            flash_info: [self.flashes.len() as f32, if fire_smooth_enabled() { 1.0 } else { 0.0 }, self.flash_gain * self.gain.abs(), if fire_light_enabled() { 1.0 } else { 0.0 }],
         };
         queue.write_buffer(&self.march_params, 0, bytemuck::bytes_of(&mp));
         let field = |slot: usize| -> wgpu::TextureView {
@@ -1002,6 +1171,10 @@ impl FireSystem {
             })
         };
         let fields = [field(0), field(1), field(2), field(3), field(4), field(5)];
+        let light = |slot: usize| -> wgpu::TextureView {
+            order.get(slot).and_then(|&gi| self.grids[gi].light.as_ref()).map_or_else(|| self.dummy_rgba_in.1.clone(), |t| t.1.clone())
+        };
+        let lights = [light(0), light(1), light(2), light(3), light(4), light(5)];
         let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("wgr_fire_march_bind"),
             layout: &self.march_layout,
@@ -1016,6 +1189,12 @@ impl FireSystem {
                 wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::TextureView(&fields[3]) },
                 wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::TextureView(&fields[4]) },
                 wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&fields[5]) },
+                wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&lights[0]) },
+                wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&lights[1]) },
+                wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::TextureView(&lights[2]) },
+                wgpu::BindGroupEntry { binding: 13, resource: wgpu::BindingResource::TextureView(&lights[3]) },
+                wgpu::BindGroupEntry { binding: 14, resource: wgpu::BindingResource::TextureView(&lights[4]) },
+                wgpu::BindGroupEntry { binding: 15, resource: wgpu::BindingResource::TextureView(&lights[5]) },
             ],
         });
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1155,6 +1334,9 @@ impl Grid {
             expansion: make_tex(device, "wgr_fire_expansion", r, size),
             div: make_tex(device, "wgr_fire_div", r, size),
             pres: [make_tex(device, "wgr_fire_p_a", r, size), make_tex(device, "wgr_fire_p_b", r, size)],
+            light: (fire_light_enabled() || cfg!(test)).then(|| make_tex(device, "wgr_fire_light", rgba, (size.0 / 2, size.1 / 2, size.2 / 2))),
+            mg_res: (mg_cycles() > 0 || cfg!(test)).then(|| make_tex(device, "wgr_fire_mg_res", r, size)),
+            mg: if mg_cycles() > 0 || cfg!(test) { mg_levels(device, size) } else { Vec::new() },
             cur: 0,
             pcur: 0,
             params: device.create_buffer(&wgpu::BufferDescriptor {
@@ -1268,6 +1450,252 @@ mod tests {
             naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
                 .validate(&module)
                 .unwrap_or_else(|e| panic!("{name}: {e:?}"));
+        }
+    }
+
+    /// FIRE-MG: every box shape coarsens exactly (no fractional cells) through at least two levels.
+    #[test]
+    fn multigrid_levels_halve_every_box_exactly() {
+        for size in [(NX, NY, NZ), (PX, PY, PZ), (STACK_X, STACK_Y, STACK_Z), (STACK_UP_X, STACK_UP_Y, NZ), (WRECK_X, WRECK_Y, WRECK_Z)] {
+            let levels = mg_dims(size);
+            assert!(levels.len() >= 2, "{size:?} -> {levels:?}");
+            let mut prev = size;
+            for d in levels {
+                assert_eq!((d.0 * 2, d.1 * 2, d.2 * 2), prev, "{size:?}");
+                assert!(d.0.min(d.1).min(d.2) >= 3, "{size:?}");
+                prev = d;
+            }
+        }
+        assert_eq!(mg_dims((40, 72, 40)), vec![(20, 36, 20), (10, 18, 10), (5, 9, 5)]);
+    }
+
+    /// FIRE-MG on a real device: the production solve (`solve_pressure`) on a box with no solids and a
+    /// smooth source in the middle, from a cold start. The residual left by 1 and 2 V-cycles must be
+    /// finite and well below the 24 Jacobi sweeps'; prints all three.
+    #[test]
+    fn multigrid_pressure_beats_jacobi_on_the_gpu() {
+        let Some((device, queue)) = crate::gfx3d::cull::tests::headless() else {
+            eprintln!("fire multigrid: no adapter");
+            return;
+        };
+        let sys = FireSystem::new(&device, &queue, wgpu::TextureFormat::Rgba16Float, 1);
+        let mut src: FireSource = bytemuck::Zeroable::zeroed();
+        src.floor = [[-1.0e9; 4]; 25];
+        src.ceiling = [[1.0e9; 4]; 25];
+        let (nx, ny, nz) = (NX as usize, NY as usize, NZ as usize);
+        let cell = 0.05f32;
+        let g = Grid::build(&device, 1, src, (NX, NY, NZ), [0.0; 3], cell, NX as f32 * cell, 0.0, [1.0, 0.0, 1.0]);
+        let mut params: SimParams = bytemuck::Zeroable::zeroed();
+        params.origin_cell = [0.0, 0.0, 0.0, cell];
+        params.dims = [NX, NY, NZ, 1];
+        params.step = [STEP, 0.0, 0.0, NX as f32 * cell / 10.0];
+        params.emitter = [1.0, 0.0, 1.0, 0.3];
+        params.floor = src.floor;
+        params.ceiling = src.ceiling;
+        queue.write_buffer(&g.params, 0, bytemuck::bytes_of(&params));
+        // h^2-scaled right-hand side: a smooth source (sigma 4 cells) low in the box, as the expansion of a flame
+        let mut rhs = vec![0.0f32; nx * ny * nz];
+        for z in 0..nz {
+            for y in 0..ny {
+                for x in 0..nx {
+                    let d2 = ((x as f32 - 19.5).powi(2) + (y as f32 - 12.0).powi(2) + (z as f32 - 19.5).powi(2)) / 16.0;
+                    rhs[(z * ny + y) * nx + x] = cell * cell * 10.0 * (-0.5 * d2).exp();
+                }
+            }
+        }
+        let extent = wgpu::Extent3d { width: NX, height: NY, depth_or_array_layers: NZ };
+        let layout = wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(NX * 4), rows_per_image: Some(NY) };
+        let write = |t: &Tex, data: &[f32]| {
+            queue.write_texture(t.0.as_image_copy(), bytemuck::cast_slice(data), layout, extent);
+        };
+        let row = (NX * 4).div_ceil(256) * 256;
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("fire_mg_test_readback"),
+            size: (row * NY * NZ) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let residual = |p: &[f32]| -> f64 {
+            let at = |x: i32, y: i32, z: i32, here: f32| -> f32 {
+                if y < 0 { return here; }
+                if x < 0 || z < 0 || x >= nx as i32 || y >= ny as i32 || z >= nz as i32 { return 0.0; }
+                p[(z as usize * ny + y as usize) * nx + x as usize]
+            };
+            let (mut r2, mut b2) = (0.0f64, 0.0f64);
+            for z in 0..nz as i32 {
+                for y in 0..ny as i32 {
+                    for x in 0..nx as i32 {
+                        let i = (z as usize * ny + y as usize) * nx + x as usize;
+                        let here = p[i];
+                        let sum = at(x + 1, y, z, here) + at(x - 1, y, z, here) + at(x, y + 1, z, here)
+                            + at(x, y - 1, z, here) + at(x, y, z + 1, here) + at(x, y, z - 1, here);
+                        let r = rhs[i] - (sum - 6.0 * here);
+                        r2 += (r as f64).powi(2);
+                        b2 += (rhs[i] as f64).powi(2);
+                    }
+                }
+            }
+            (r2 / b2).sqrt()
+        };
+        let mut results = Vec::new();
+        for cycles in [0u32, 1, 2] {
+            write(&g.div, &rhs);
+            write(&g.pres[0], &vec![0.0; nx * ny * nz]);
+            let groups = (NX.div_ceil(4), NY.div_ceil(4), NZ.div_ceil(4));
+            let level_groups = std::cell::Cell::new(groups);
+            let mut encoder = device.create_command_encoder(&Default::default());
+            let pc = {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None, timestamp_writes: None });
+                let mut run = |pipeline: &wgpu::ComputePipeline, b: Binds| {
+                    let bg = sys.bind(&device, &g.params, b);
+                    pass.set_pipeline(pipeline);
+                    pass.set_bind_group(0, &bg, &[]);
+                    let gr = level_groups.get();
+                    pass.dispatch_workgroups(gr.0, gr.1, gr.2);
+                };
+                sys.solve_pressure(&g, 0, groups, cycles, &level_groups, &mut run)
+            };
+            encoder.copy_texture_to_buffer(
+                g.pres[pc].0.as_image_copy(),
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &readback,
+                    layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(NY) },
+                },
+                extent,
+            );
+            queue.submit([encoder.finish()]);
+            readback.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            let bytes = readback.slice(..).get_mapped_range().expect("mapped readback").to_vec();
+            readback.unmap();
+            let mut p = vec![0.0f32; nx * ny * nz];
+            for z in 0..nz {
+                for y in 0..ny {
+                    let off = (z * ny + y) * row as usize;
+                    let src_row: &[f32] = bytemuck::cast_slice(&bytes[off..off + nx * 4]);
+                    p[(z * ny + y) * nx..(z * ny + y + 1) * nx].copy_from_slice(src_row);
+                }
+            }
+            results.push(residual(&p));
+        }
+        eprintln!("fire pressure relative residual: jacobi24 {:.4}, mg1 {:.4}, mg2 {:.4}", results[0], results[1], results[2]);
+        assert!(results.iter().all(|r| r.is_finite()), "{results:?}");
+        // CPU mirror (bc 3): 0.4665 / 0.0925; 24 Jacobi sweeps 0.7375
+        assert!(results[1] < results[0] * 0.75, "one V-cycle should beat 24 Jacobi sweeps: {results:?}");
+        assert!(results[2] < results[0] * 0.2, "two V-cycles should leave a fraction of the Jacobi residual: {results:?}");
+    }
+
+    /// FIRE-MG CPU mirror of fire_sim.wgsl's cs_mg_* kernels (no solids, ground mirror, open sides
+    /// and top), to tell an algorithm fault from a GPU one: prints the residual after each V-cycle.
+    #[test]
+    fn multigrid_pressure_cpu_mirror() {
+        #[derive(Clone)]
+        struct L { n: [usize; 3], v: Vec<f32> }
+        let idx = |n: [usize; 3], x: usize, y: usize, z: usize| (z * n[1] + y) * n[0] + x;
+        let bc = std::cell::Cell::new(0u32); // 0: as the shader, 1: ground open too, 2: face Dirichlet (ghost -here)
+        let get = |g: &L, x: i32, y: i32, z: i32, here: f32| -> f32 {
+            if y < 0 && bc.get() != 1 { return here; }
+            if x < 0 || z < 0 || y < 0 || x >= g.n[0] as i32 || y >= g.n[1] as i32 || z >= g.n[2] as i32 {
+                // 3: the shader's fine-grid zero (one fine cell out) kept on every level
+                let t = 0.5 + 0.5 * g.n[0] as f32 / 40.0;
+                return match bc.get() { 2 => -here, 3 => here * (1.0 - 1.0 / t), _ => 0.0 };
+            }
+            g.v[idx(g.n, x as usize, y as usize, z as usize)]
+        };
+        let sum6 = |g: &L, x: i32, y: i32, z: i32, here: f32| {
+            get(g, x + 1, y, z, here) + get(g, x - 1, y, z, here) + get(g, x, y + 1, z, here)
+                + get(g, x, y - 1, z, here) + get(g, x, y, z + 1, here) + get(g, x, y, z - 1, here)
+        };
+        let smooth = |p: &L, rhs: &L| -> L {
+            let mut o = p.clone();
+            for z in 0..p.n[2] { for y in 0..p.n[1] { for x in 0..p.n[0] {
+                let i = idx(p.n, x, y, z);
+                let here = p.v[i];
+                let jac = (sum6(p, x as i32, y as i32, z as i32, here) - rhs.v[i]) / 6.0;
+                o.v[i] = here + 0.857142857 * (jac - here);
+            }}}
+            o
+        };
+        let residual = |p: &L, rhs: &L| -> L {
+            let mut o = p.clone();
+            for z in 0..p.n[2] { for y in 0..p.n[1] { for x in 0..p.n[0] {
+                let i = idx(p.n, x, y, z);
+                let here = p.v[i];
+                o.v[i] = rhs.v[i] - (sum6(p, x as i32, y as i32, z as i32, here) - 6.0 * here);
+            }}}
+            o
+        };
+        let restrict = |f: &L, scale: f32| -> L {
+            let n = [f.n[0] / 2, f.n[1] / 2, f.n[2] / 2];
+            let mut o = L { n, v: vec![0.0; n[0] * n[1] * n[2]] };
+            for z in 0..n[2] { for y in 0..n[1] { for x in 0..n[0] {
+                let mut s = 0.0;
+                for k in 0..8 { s += f.v[idx(f.n, 2 * x + (k & 1), 2 * y + ((k >> 1) & 1), 2 * z + ((k >> 2) & 1))]; }
+                o.v[idx(n, x, y, z)] = s * scale;
+            }}}
+            o
+        };
+        let prolong_add = |f: &L, c: &L| -> L {
+            let mut o = f.clone();
+            for z in 0..f.n[2] { for y in 0..f.n[1] { for x in 0..f.n[0] {
+                let q = [(x as f32 + 0.5) * 0.5 - 0.5, (y as f32 + 0.5) * 0.5 - 0.5, (z as f32 + 0.5) * 0.5 - 0.5];
+                let b = q.map(|v| v.floor());
+                let fr = [q[0] - b[0], q[1] - b[1], q[2] - b[2]];
+                let mut e = 0.0;
+                for k in 0..8 {
+                    let o3 = [k & 1, (k >> 1) & 1, (k >> 2) & 1];
+                    let mut w = 1.0;
+                    let mut ci = [0usize; 3];
+                    for a in 0..3 {
+                        w *= if o3[a] == 1 { fr[a] } else { 1.0 - fr[a] };
+                        ci[a] = ((b[a] as i32 + o3[a] as i32).clamp(0, c.n[a] as i32 - 1)) as usize;
+                    }
+                    e += c.v[idx(c.n, ci[0], ci[1], ci[2])] * w;
+                }
+                let i = idx(f.n, x, y, z);
+                o.v[i] += e;
+            }}}
+            o
+        };
+        let norm = |r: &L| r.v.iter().map(|v| (*v as f64).powi(2)).sum::<f64>().sqrt();
+        let n0 = [40usize, 72, 40];
+        let cell = 0.05f32;
+        let mut rhs = L { n: n0, v: vec![0.0; n0[0] * n0[1] * n0[2]] };
+        for z in 0..n0[2] { for y in 0..n0[1] { for x in 0..n0[0] {
+            let d2 = ((x as f32 - 19.5).powi(2) + (y as f32 - 12.0).powi(2) + (z as f32 - 19.5).powi(2)) / 16.0;
+            rhs.v[idx(n0, x, y, z)] = cell * cell * 10.0 * (-0.5 * d2).exp();
+        }}}
+        let b = norm(&rhs);
+        for (mode, coarse_sweeps, scale) in [(3u32, MG_COARSE_SWEEPS as usize, 0.5f32)] {
+            bc.set(mode);
+            let mut p = L { n: n0, v: vec![0.0; rhs.v.len()] };
+            let mut out = Vec::new();
+            for _ in 0..3 {
+                for _ in 0..2 { p = smooth(&p, &rhs); }
+                // descend
+                let mut rhss = vec![restrict(&residual(&p, &rhs), scale)];
+                let mut es: Vec<L> = Vec::new();
+                loop {
+                    let r = rhss.last().unwrap().clone();
+                    let mut e = L { n: r.n, v: vec![0.0; r.v.len()] };
+                    let coarsest = r.n.iter().any(|v| v % 2 == 1) || *r.n.iter().min().unwrap() < 6 || rhss.len() == 3;
+                    for _ in 0..if coarsest { coarse_sweeps } else { 2 } { e = smooth(&e, &r); }
+                    if coarsest { es.push(e); break; }
+                    rhss.push(restrict(&residual(&e, &r), scale));
+                    es.push(e);
+                }
+                // ascend
+                for li in (0..es.len() - 1).rev() {
+                    let mut e = prolong_add(&es[li], &es[li + 1]);
+                    for _ in 0..2 { e = smooth(&e, &rhss[li]); }
+                    es[li] = e;
+                }
+                p = prolong_add(&p, &es[0]);
+                for _ in 0..2 { p = smooth(&p, &rhs); }
+                out.push(norm(&residual(&p, &rhs)) / b);
+            }
+            eprintln!("cpu mirror, bc {mode}, {coarse_sweeps} coarsest sweeps, restrict x{scale}: residual after 1/2/3 cycles {out:.4?}");
+            assert!(out[1] < 0.15 && out[2] <= out[1] * 1.05, "multigrid stopped converging: {out:?}");
         }
     }
 

@@ -27,6 +27,7 @@ struct SimParams {
                             // z: the box frame's turn about the vertical through the emitter (rad),
                             // w: a bursting charge's outward speed (m/s, 0 for none)
     tint: vec4<f32>,        // FIRE-002: grey share of new smoke: x mean, y swing (fields .w)
+    light: vec4<f32>,       // FIRE-LIGHT: the direction to the sun in the box's frame (xyz)
     // the solids (Fire Pro's colliders, solids.wgsl): 10 x 10 columns over the box, each open
     // from floor to ceiling (world y); a wall is a column whose ceiling is below its floor
     floor_h: array<vec4<f32>, 25>,
@@ -446,3 +447,167 @@ fn cs_project(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (speed > cap) { v = v * (cap / speed); }
     textureStore(outRgba, id, vec4<f32>(enforce(id, v), 0.0));
 }
+
+// FIRE-MG (WGR_FIRE_MG=N): the pressure solve as N multigrid V-cycles instead of the 24 Jacobi
+// iterations -- the scheme Fire Pro's solver used and procedural-fire (MIT, research/webgpu.md)
+// measured: one V(2,2) cycle cuts the residual ~10x where 40 Jacobi sweeps reach ~0.67. Each kernel
+// works on whichever level it is bound to: the level's size is its output texture's (the input's for
+// the restriction's fine side), its cell size the box's scaled by the box/level width ratio. Same
+// equation and boundaries as cs_jacobi: h^2-scaled right-hand side, zero pressure on the open sides
+// and top, mirror at the ground and in solid cells (a coarse cell is solid if its centre is).
+fn lvH(n: vec3<i32>) -> f32 { return S.origin_cell.w * f32(S.dims.x) / f32(n.x); }
+fn lvSolid(id: vec3<i32>, n: vec3<i32>) -> bool {
+    return solidAt(S.origin_cell.xyz + (vec3<f32>(id) + 0.5) * lvH(n));
+}
+fn lvP(id: vec3<i32>, here: f32, n: vec3<i32>) -> f32 {
+    if (id.y < 0 && S.dims.w == 1u) { return here; }
+    if (any(id < vec3<i32>(0)) || any(id >= n)) {
+        // the open sides and top: the box's equation is zero one FINE cell outside (cs_jacobi's
+        // ghost). A coarse level's ghost cell lies further out, so it extrapolates its edge value to
+        // that same zero; a plain zero ghost put the boundary 2-8 cells too far out and the coarse
+        // correction overshot until the cycles diverged (multigrid_pressure_cpu_mirror)
+        let t = 0.5 + 0.5 * f32(n.x) / f32(S.dims.x);
+        return here * (1.0 - 1.0 / t);
+    }
+    if (lvSolid(id, n)) { return here; }
+    return textureLoad(pIn, id, 0).x;
+}
+fn lvSum(id: vec3<i32>, here: f32, n: vec3<i32>) -> f32 {
+    return lvP(id + vec3<i32>(1, 0, 0), here, n) + lvP(id - vec3<i32>(1, 0, 0), here, n)
+         + lvP(id + vec3<i32>(0, 1, 0), here, n) + lvP(id - vec3<i32>(0, 1, 0), here, n)
+         + lvP(id + vec3<i32>(0, 0, 1), here, n) + lvP(id - vec3<i32>(0, 0, 1), here, n);
+}
+
+// damped Jacobi smoother (weight 6/7, the usual one for the 7-point Laplacian)
+@compute @workgroup_size(4, 4, 4)
+fn cs_mg_smooth(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let id = vec3<i32>(gid);
+    let n = vec3<i32>(textureDimensions(outR));
+    if (any(id >= n)) { return; }
+    let here = textureLoad(pIn, id, 0).x;
+    var rhs = textureLoad(dIn, id, 0).x;
+    if (lvSolid(id, n)) { rhs = 0.0; }
+    let jac = (lvSum(id, here, n) - rhs) / 6.0;
+    textureStore(outR, id, vec4<f32>(here + 0.857142857 * (jac - here), 0.0, 0.0, 0.0));
+}
+
+// residual of the h^2-scaled equation: rhs - (sum - 6 p)
+@compute @workgroup_size(4, 4, 4)
+fn cs_mg_residual(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let id = vec3<i32>(gid);
+    let n = vec3<i32>(textureDimensions(outR));
+    if (any(id >= n)) { return; }
+    var r = 0.0;
+    if (!lvSolid(id, n)) {
+        let here = textureLoad(pIn, id, 0).x;
+        r = textureLoad(dIn, id, 0).x - (lvSum(id, here, n) - 6.0 * here);
+    }
+    textureStore(outR, id, vec4<f32>(r, 0.0, 0.0, 0.0));
+}
+
+// fine residual (dIn) -> coarse right-hand side (outR): the mean of the 8 children, x4 because the
+// coarse equation is scaled by its own cell size squared, (2h)^2
+@compute @workgroup_size(4, 4, 4)
+fn cs_mg_restrict(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let id = vec3<i32>(gid);
+    let n = vec3<i32>(textureDimensions(outR));
+    if (any(id >= n)) { return; }
+    let nf = vec3<i32>(textureDimensions(dIn));
+    var s = 0.0;
+    for (var k = 0; k < 8; k++) {
+        let c = min(id * 2 + vec3<i32>(k & 1, (k >> 1) & 1, (k >> 2) & 1), nf - 1);
+        s += textureLoad(dIn, c, 0).x;
+    }
+    textureStore(outR, id, vec4<f32>(s * 0.5, 0.0, 0.0, 0.0));
+}
+
+@compute @workgroup_size(4, 4, 4)
+fn cs_mg_zero(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let id = vec3<i32>(gid);
+    if (any(id >= vec3<i32>(textureDimensions(outR)))) { return; }
+    textureStore(outR, id, vec4<f32>(0.0));
+}
+
+// fine value (pIn) + the coarse correction (dIn) interpolated trilinearly -> outR
+@compute @workgroup_size(4, 4, 4)
+fn cs_mg_prolong(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let id = vec3<i32>(gid);
+    let n = vec3<i32>(textureDimensions(outR));
+    if (any(id >= n)) { return; }
+    let nc = vec3<i32>(textureDimensions(dIn));
+    let q = (vec3<f32>(id) + 0.5) * 0.5 - 0.5;
+    let b = vec3<i32>(floor(q));
+    let f = q - vec3<f32>(b);
+    var e = 0.0;
+    for (var k = 0; k < 8; k++) {
+        let o = vec3<i32>(k & 1, (k >> 1) & 1, (k >> 2) & 1);
+        let w = select(1.0 - f, f, vec3<bool>(o == vec3<i32>(1)));
+        e += textureLoad(dIn, clamp(b + o, vec3<i32>(0), nc - 1), 0).x * w.x * w.y * w.z;
+    }
+    textureStore(outR, id, vec4<f32>(textureLoad(pIn, id, 0).x + e, 0.0, 0.0, 0.0));
+}
+
+// FIRE-LIGHT (WGR_FIRE_LIGHT=1): the light volume Fire Pro's renderer reads (lighting.wgsl
+// incidentLight), at half the box's resolution, rebuilt after every step. Per texel: the smoke's
+// optical depth toward the sun over the march's first 2 and all 6 widening taps (a flame's and a
+// plume's self-shadow reach, fire_march.wgsl shadowAlong), over 4 taps straight up (the plume's sky
+// shadow), and the flame glow arriving from six directions, Beer-attenuated (Fire Pro: six
+// rotated directions, growing intervals). Raw smoke units: the march applies the box's density.
+fn lightField(world: vec3<f32>) -> vec4<f32> {
+    let q = uvw(world);
+    if (any(q < vec3<f32>(0.0)) || any(q > vec3<f32>(1.0))) { return vec4<f32>(0.0); }
+    // the march fades the field out at the box's sides and top; so does its light
+    let side = min(min(q.x, 1.0 - q.x), min(q.z, 1.0 - q.z));
+    let fade = smoothstep(0.0, 0.1, side) * smoothstep(0.0, 0.15, 1.0 - q.y);
+    let f = textureSampleLevel(fieldsIn, lin, q, 0.0);
+    return vec4<f32>(f.x * fade, f.y, f.z * fade, f.w * fade);
+}
+fn flameGlow(life: f32) -> f32 { return clamp(life * 5.0, 0.0, 1.0); }
+
+@compute @workgroup_size(4, 4, 4)
+fn cs_light(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let id = vec3<i32>(gid);
+    let n = vec3<i32>(textureDimensions(outRgba));
+    if (any(id >= n)) { return; }
+    let cell = S.origin_cell.w;
+    // the centre of this texel's 2x2x2 block of simulation cells
+    let p = S.origin_cell.xyz + (vec3<f32>(id) * 2.0 + 1.0) * cell;
+    let sun = S.light.xyz;
+    var tauSun2 = 0.0;
+    var tau = 0.0;
+    var t = cell;
+    for (var k = 0; k < 6; k++) {
+        let ds = cell * (2.0 + f32(k) * 3.0);
+        tau += max(lightField(p + sun * (t + ds * 0.5)).x, 0.0) * ds;
+        t += ds;
+        if (k == 1) { tauSun2 = tau; }
+    }
+    var tauSky = 0.0;
+    t = cell;
+    for (var k = 0; k < 4; k++) {
+        let ds = cell * (2.0 + f32(k) * 3.0);
+        tauSky += max(lightField(p + vec3<f32>(0.0, 1.0, 0.0) * (t + ds * 0.5)).x, 0.0) * ds;
+        t += ds;
+    }
+    let dirs = array<vec3<f32>, 6>(
+        vec3<f32>(0.36, 0.48, -0.8), vec3<f32>(-0.36, -0.48, 0.8),
+        vec3<f32>(-0.8, 0.6, 0.0), vec3<f32>(0.8, -0.6, 0.0),
+        vec3<f32>(0.48, 0.64, 0.6), vec3<f32>(-0.48, -0.64, -0.6));
+    var glowSum = 0.0;
+    for (var d = 0; d < 6; d++) {
+        var s = 0.0;
+        var interval = cell * 1.5;
+        var trans = 1.0;
+        for (var k = 0; k < 5; k++) {
+            let f = lightField(p + dirs[d] * (s + interval * 0.5));
+            // flame glow gathered along the ray, dimmed by the smoke (and flame) between
+            glowSum += trans * flameGlow(f.z) * interval;
+            trans *= exp(-(max(f.x, 0.0) * FIRE_LIGHT_SMOKE_EXT + flameGlow(f.z)) * interval);
+            s += interval;
+            interval *= 1.65;
+        }
+    }
+    textureStore(outRgba, id, vec4<f32>(tauSun2, tau, tauSky, glowSum / 6.0));
+}
+// the smoke's extinction per unit of field (1/m) used inside the light volume (Fire Pro's campfire 7.11)
+const FIRE_LIGHT_SMOKE_EXT: f32 = 7.11;
