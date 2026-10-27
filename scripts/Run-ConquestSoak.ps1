@@ -24,6 +24,7 @@ param(
     [int]$ShotEveryPolls = 10,
     [int]$Seed = 0,
     [string]$Probe = '',
+    [string]$Mission = 'conquest-everon.Eden', # a folder under content/default-packs/conquest/missions
     [switch]$CommanderTest,
     [switch]$Visible
 )
@@ -34,7 +35,7 @@ if (!$env:LOCK_OWNER) {
     $argv = @((Join-Path $PSScriptRoot 'with-game-lock.sh'), $shellExe.Replace('\', '/'), '-NoProfile', '-File', $PSCommandPath,
         '-GameDir', $GameDir, '-GameMinutes', "$GameMinutes", '-Minutes', "$Minutes", '-AccTime', "$AccTime",
         '-FpsCap', "$FpsCap", '-PollSeconds', "$PollSeconds",
-        '-ShotEveryPolls', "$ShotEveryPolls", '-Seed', "$Seed")
+        '-ShotEveryPolls', "$ShotEveryPolls", '-Seed', "$Seed", '-Mission', $Mission)
     if ($Bin) { $argv += @('-Bin', $Bin) }
     if ($Visible) { $argv += '-Visible' }
     if ($CommanderTest) { $argv += '-CommanderTest' }
@@ -55,7 +56,7 @@ $env:POSEIDON_USER_DIR = Join-Path $out 'user'
 New-Item -ItemType Directory -Force $env:POSEIDON_USER_DIR | Out-Null
 [IO.File]::WriteAllLines((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'), @('qualityPreset=1;', 'dlssMode=0;', 'vsync=0;', "fpsCap=$FpsCap;"))
 if ($Seed) { $env:POSEIDON_RNG_SEED = "$Seed" }
-$mission = Join-Path $root 'content/default-packs/conquest/missions/conquest-everon.Eden'
+$mission = Join-Path $root ('content/default-packs/conquest/missions/' + $Mission)
 $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
 $listener.Start(); $port = $listener.LocalEndpoint.Port; $listener.Stop()
 $log = Join-Path $out 'engine.log'
@@ -88,7 +89,8 @@ try {
     function Sqf($code) { $null = Send @{cmd = 'exec'; code = $code } }
     function Eval($code) { return (Send @{cmd = 'eval'; code = $code }).result }
     function Shot($name) {
-        Sqf 'forceMap true; mapAnimAdd [0, 0.85, [3900, 7400, 0]]; mapAnimCommit'
+        $centre = if ($Mission -like '*everon*') { '[3900, 7400, 0]' } else { '[6400, 6400, 0]' }
+        Sqf "forceMap true; mapAnimAdd [0, 0.85, $centre]; mapAnimCommit"
         Start-Sleep -Seconds 2
         $null = Send @{cmd = 'screenshot'; path = (Join-Path $out ($name + '.png')) }
         Start-Sleep -Seconds 1

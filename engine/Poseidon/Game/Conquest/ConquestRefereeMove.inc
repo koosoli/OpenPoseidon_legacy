@@ -127,9 +127,13 @@ void TrackFerry(Referee& r, GroupRecord& rec, float now)
     const float toHq = hq >= 0 ? std::hypot(at.X() - r.war.defs[hq].x, at.Z() - r.war.defs[hq].y) : 1.0e9f;
     // On the ground near home, landed by its order or on its own: the AI pilot set the Mi-17 down at the
     // Airfield 200 m short of its slot and waited there for good (soak probe, 2026-10-26).
-    if (above >= 8.0f || heli->Speed().Size() >= 1.0f)
+    // ... or hanging still over home for 20 s: over Goisse (Malden) the AI pilot would not set down at all and
+    // hovered 47 m up for good.
+    if (heli->Speed().Size() >= 1.0f)
         rec.bestAt = now; // moving: "still since" starts again
-    if ((rec.landing || std::min(toGo, toHq) < 500.0f) && now - rec.orderedAt > 10.0f && now - rec.bestAt > 5.0f)
+    const float still = now - rec.bestAt;
+    if ((rec.landing || std::min(toGo, toHq) < 500.0f) && now - rec.orderedAt > 10.0f &&
+        ((above < 8.0f && still > 5.0f) || still > 20.0f))
     {
         float refund = 0.0f;
         if (rec.type >= 0 && rec.type < static_cast<int>(r.config.squads.size()))
