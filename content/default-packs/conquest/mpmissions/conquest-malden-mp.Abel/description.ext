@@ -7,3 +7,13 @@ onLoadMission = "Conquest: take Malden's command posts";
 respawn = "BASE";   // back at the side's base (markers respawn_west / respawn_east) ...
 respawnDelay = 10;  // ... ten seconds after a death: the war goes on
 disabledAI = 1;     // empty player slots stay empty; the referee fields the AI's own squads
+
+// The war's settings, chosen by the host in the lobby (the referee reads param1 and param2).
+titleParam1 = "Supplies each side starts with";
+valuesParam1[] = {1000, 2000, 3000, 5000};
+textsParam1[] = {"1000", "2000", "3000", "5000"};
+defValueParam1 = 2000;
+titleParam2 = "Time limit";
+valuesParam2[] = {0, 60, 90, 120};
+textsParam2[] = {"None", "1 hour", "1.5 hours", "2 hours"};
+defValueParam2 = 0;

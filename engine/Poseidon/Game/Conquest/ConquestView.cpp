@@ -218,6 +218,8 @@ struct State
     Uint64 statusTicks = 0;
     std::vector<Flash> flashes;
     int deployBase = -1;
+    int placeBase = -1; // a built structure: the next left click puts it up inside this base ...
+    int placeKind = -1; // ... this structure (StructureTypes)
     bool possessionToggle = true; // the HUD's "Allow taking control of soldiers"
 };
 
@@ -569,6 +571,15 @@ void FocusSoldier(Person* soldier)
         s.distance = 120.0f;
 }
 
+// A squad clicked (on the map or its card): the camera goes to its leader and follows him (owner,
+// 2026-10-26); Tab and the soldier buttons then reach the others.
+void FocusLeader(int id)
+{
+    const std::vector<Person*> men = SquadSoldiers(id); // the leader first
+    if (!men.empty())
+        FocusSoldier(men.front());
+}
+
 // Tab: the next soldier of the (first) selected squad.
 void NextSoldier()
 {
@@ -582,15 +593,11 @@ void NextSoldier()
     FocusSoldier(it == men.end() || it + 1 == men.end() ? men.front() : *(it + 1));
 }
 
-// A click selects the squad of the soldier (or vehicle) under the pointer, and that soldier: the
-// camera follows him and "Take control" becomes him. A vehicle stands for its crew: the one of the
-// squad in it (its leader if he is aboard) is the soldier picked.
+// A click selects the squad of the soldier (or vehicle) under the pointer; the camera goes to its leader.
 void ClickSelect(float x, float y, bool add)
 {
     State& s = St();
     int best = 0;
-    Person* soldier = nullptr;
-    const Transport* vehicle = nullptr;
     float bestD2 = PickPixels * PickPixels;
     for (const SquadDraw& d : CollectSquads())
     {
@@ -601,8 +608,6 @@ void ClickSelect(float x, float y, bool add)
             {
                 bestD2 = d2;
                 best = d.group.id;
-                soldier = d.soldiers[i];
-                vehicle = nullptr;
             }
         }
         for (size_t i = 0; i < d.vehicles.size(); i++)
@@ -612,8 +617,6 @@ void ClickSelect(float x, float y, bool add)
             {
                 bestD2 = d2;
                 best = d.group.id;
-                soldier = nullptr;
-                vehicle = d.vehicleObjects[i];
             }
         }
     }
@@ -649,20 +652,7 @@ void ClickSelect(float x, float y, bool add)
         ToggleSelected(best);
     else
         s.selected.push_back(best);
-    if (!soldier && vehicle)
-        for (Person* man : SquadSoldiers(best))
-            if (AIUnit* unit = man->Brain(); unit && unit->GetVehicleIn() == vehicle)
-            {
-                soldier = man; // the first is the leader, when he is aboard
-                break;
-            }
-    s.unit = soldier;
-    if (soldier)
-        s.follow = soldier;
-    else if (vehicle)
-        s.follow = const_cast<Transport*>(vehicle);
-    if (s.follow && s.distance > 120.0f)
-        s.distance = 120.0f; // come down to the soldier picked
+    FocusLeader(best);
 }
 
 // The view on the player's own soldier (C, or the command bar's Me): centred and followed; the
@@ -740,6 +730,25 @@ void OrderAt(float uiX, float uiY)
         if (std::hypot(snap.war.defs[o].x - x, snap.war.defs[o].y - y) <= snap.war.defs[o].radius * 1.2f)
             what = (snap.war.states[o].owner == PlayerSide() ? "Holding " : "Attacking ") + snap.war.defs[o].name;
     SetStatus(what + (n == 1 ? "  -  1 squad" : "  -  " + std::to_string(n) + " squads"));
+}
+
+// The built structure the commander is placing goes up where he clicked, if it may stand there.
+void PlaceAtPointer(float uiX, float uiY)
+{
+    State& s = St();
+    float x = 0.0f, y = 0.0f;
+    if (!GroundAt(uiX, uiY, x, y))
+        return;
+    const std::string why = PlaceAt(s.placeBase, s.placeKind, x, y);
+    if (!why.empty())
+    {
+        SetStatus("Cannot build here: " + why + ". Right click cancels.", ColWarn);
+        return;
+    }
+    const std::vector<StructureType> kinds = StructureTypes();
+    SetStatus((s.placeKind < static_cast<int>(kinds.size()) ? kinds[s.placeKind].name : std::string("It")) + " stands.");
+    s.flashes.push_back({x, y, SDL_GetTicks()});
+    s.placeBase = s.placeKind = -1;
 }
 
 void FireBarrageAt(float uiX, float uiY)
@@ -1079,6 +1088,21 @@ void DrawObjectives(ImDrawList* draw)
         if (d.kind == ObjectiveKind::HQ)
             name += "  HQ";
         Pill(draw, ImVec2(c.x, c.y), f.bold, 15.0f, name.c_str(), SideColour(st.owner, 0.88f), IM_COL32(255, 255, 255, 255));
+        // A base of ours: its supplies (the HQ's are the side's) and what stands there, under its name.
+        if (st.owner == PlayerSide() && st.owner != NoSide)
+        {
+            const float supplies = d.kind == ObjectiveKind::HQ ? snap.war.pool[st.owner] : st.stock;
+            std::string badge = std::to_string(static_cast<int>(supplies)) + " supplies";
+            static const char* shortName[] = {"Barracks", "Motor pool", "Helipad"};
+            std::string stands;
+            for (const StructureInfo& si : snap.structures)
+                if (si.base == static_cast<int>(o) && si.kind >= 0 && si.kind < 3)
+                    stands += (stands.empty() ? "" : ", ") + std::string(shortName[si.kind]);
+            if (!stands.empty())
+                badge += "  |  " + stands;
+            const ImU32 tone = supplies >= 300.0f ? ColGood : supplies >= 100.0f ? ColWarn : ColBad;
+            Pill(draw, ImVec2(c.x, c.y - 22.0f), f.body, 12.0f, badge.c_str(), IM_COL32(16, 20, 26, 210), tone);
+        }
         const bool moving = st.owner == NoSide ? st.level > 0.0f : (st.holder != st.owner || st.level < 1.0f);
         if (moving || st.contested)
         {
@@ -1090,6 +1114,36 @@ void DrawObjectives(ImDrawList* draw)
                 Pill(draw, ImVec2(c.x, c.y + 34.0f), f.bold, 13.0f, "CONTESTED", IM_COL32(40, 30, 10, 220), ColWarn);
         }
     }
+}
+
+// Supply lines: each of our supply trucks on its way, a dashed line to the base it is bound for, with its
+// load -- which base is being supplied, by whom, and how much is coming.
+void DrawSupplyLines(ImDrawList* draw)
+{
+    const int me = PlayerSide();
+    const Fonts& f = Font();
+    ForEachGroup(
+        [&](const LiveGroup& g)
+        {
+            if (g.side != me || g.role != "supply" || !g.hasDest || !g.group || !g.group->Leader())
+                return;
+            const Vector3 at = g.group->Leader()->Position();
+            ScreenPoint a, b;
+            if (!Project(at + Vector3(0.0f, 2.0f, 0.0f), a) || !Project(Vector3(g.destX, Ground(g.destX, g.destY) + 2.0f, g.destY), b))
+                return;
+            const float len = std::hypot(b.x - a.x, b.y - a.y);
+            const int dashes = std::max(1, static_cast<int>(len / 14.0f));
+            for (int i = 0; i < dashes; i += 2)
+            {
+                const float t0 = static_cast<float>(i) / static_cast<float>(dashes);
+                const float t1 = std::min(1.0f, static_cast<float>(i + 1) / static_cast<float>(dashes));
+                draw->AddLine(ImVec2(a.x + (b.x - a.x) * t0, a.y + (b.y - a.y) * t0), ImVec2(a.x + (b.x - a.x) * t1, a.y + (b.y - a.y) * t1),
+                              WithAlpha(ColGood, 0.85f), 2.0f);
+            }
+            draw->AddCircleFilled(ImVec2(b.x, b.y), 4.0f, ColGood);
+            if (!g.doing.empty())
+                Pill(draw, ImVec2((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f), f.body, 12.0f, g.doing.c_str(), IM_COL32(16, 20, 26, 200), ColGood);
+        });
 }
 
 // A human player's mark over his soldier symbol: a white ring round a head, so the commander knows
@@ -1253,6 +1307,40 @@ void DrawFlashes(ImDrawList* draw)
 void DrawBox(ImDrawList* draw)
 {
     const State& s = St();
+    if (s.placeKind >= 0 && s.placeBase >= 0 && s.placeBase < static_cast<int>(GetSnapshot().war.defs.size()))
+    {
+        // Where the structure may stand: inside the base (its ring), under the pointer a square.
+        const ObjectiveDef& d = GetSnapshot().war.defs[s.placeBase];
+        const float reach = d.radius + 40.0f;
+        ScreenPoint prev;
+        bool prevOk = false;
+        for (int i = 0; i <= 64; i++)
+        {
+            const float a = static_cast<float>(i) * (2.0f * Pi / 64.0f);
+            const float px = d.x + std::cos(a) * reach, py = d.y + std::sin(a) * reach;
+            ScreenPoint p;
+            const bool ok = Project(Vector3(px, Ground(px, py) + 0.4f, py), p);
+            if (ok && prevOk && i % 2 == 0)
+                draw->AddLine(ImVec2(prev.x, prev.y), ImVec2(p.x, p.y), ColGood, 2.0f);
+            prev = p;
+            prevOk = ok;
+        }
+        const ImVec2 m = ImGui::GetIO().MousePos;
+        float x = 0.0f, y = 0.0f;
+        if (GroundAt(m.x, m.y, x, y))
+        {
+            const bool inside = std::hypot(x - d.x, y - d.y) <= reach;
+            const float h = 7.0f;
+            ScreenPoint c[4];
+            const float off[4][2] = {{-h, -h}, {h, -h}, {h, h}, {-h, h}};
+            bool all = true;
+            for (int i = 0; i < 4; i++)
+                all &= Project(Vector3(x + off[i][0], Ground(x + off[i][0], y + off[i][1]) + 0.4f, y + off[i][1]), c[i]);
+            if (all)
+                for (int i = 0; i < 4; i++)
+                    draw->AddLine(ImVec2(c[i].x, c[i].y), ImVec2(c[(i + 1) % 4].x, c[(i + 1) % 4].y), inside ? ColGood : ColBad, 2.5f);
+        }
+    }
     if (s.targeting)
     {
         // The barrage's reach under the pointer.
@@ -1676,10 +1764,15 @@ void DrawSquadList(const Snapshot& snap, const std::vector<SquadDraw>& squads)
             if (ImGui::InvisibleButton("card", ImVec2(width, h)))
             {
                 if (io.KeyShift || io.KeyCtrl)
+                {
                     ToggleSelected(d.group.id);
+                    St().unit = nullptr;
+                }
                 else
+                {
                     St().selected = {d.group.id};
-                St().unit = nullptr;
+                    FocusLeader(d.group.id);
+                }
             }
             const bool hovered = ImGui::IsItemHovered();
             if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
@@ -1739,6 +1832,86 @@ const char* RoleTransport(const std::string& role)
     if (role == "air")
         return "with a helicopter";
     return "on foot";
+}
+
+// Command & Conquer's clock: the part of a tile not yet built is shaded, a wedge that shrinks clockwise
+// from twelve o'clock as the build is paid.
+void DrawClock(ImDrawList* draw, ImVec2 a, ImVec2 b, float progress, ImU32 shade)
+{
+    progress = std::clamp(progress, 0.0f, 1.0f);
+    if (progress >= 1.0f)
+        return;
+    const ImVec2 c((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f);
+    const float radius = std::hypot(b.x - a.x, b.y - a.y);
+    draw->PushClipRect(a, b, true);
+    const float start = -Pi * 0.5f + progress * 2.0f * Pi, end = Pi * 1.5f;
+    const int steps = std::max(2, static_cast<int>((end - start) / (2.0f * Pi) * 48.0f));
+    for (int i = 0; i < steps; i++)
+    {
+        const float t0 = start + (end - start) * static_cast<float>(i) / static_cast<float>(steps);
+        const float t1 = start + (end - start) * static_cast<float>(i + 1) / static_cast<float>(steps);
+        draw->AddTriangleFilled(c, ImVec2(c.x + std::cos(t0) * radius, c.y + std::sin(t0) * radius),
+                                ImVec2(c.x + std::cos(t1) * radius, c.y + std::sin(t1) * radius), shade);
+    }
+    draw->PopClipRect();
+}
+
+// What of one kind is in production at a base: how many, and the clock of the one being built.
+struct Queued
+{
+    int count = 0;
+    bool active = false;
+    float progress = 0.0f;
+    bool paused = false;
+    bool placing = false;
+    std::string why;
+};
+
+Queued QueuedAt(const Snapshot& snap, int base, int type, bool structure)
+{
+    Queued q;
+    for (const BuildInfo& b : snap.builds)
+    {
+        if (b.base != base || b.type != type || b.structure != structure)
+            continue;
+        q.count++;
+        q.placing |= b.placing;
+        if (b.active)
+        {
+            q.active = true;
+            q.progress = b.progress;
+            q.paused = b.paused;
+            q.why = b.why;
+        }
+    }
+    return q;
+}
+
+// A tile's production: its clock, PAUSED when it waits for supplies, and how many more wait.
+void DrawQueued(ImDrawList* draw, ImVec2 a, ImVec2 b, const Queued& q)
+{
+    if (q.count == 0)
+        return;
+    if (q.active)
+    {
+        DrawClock(draw, a, b, q.progress, IM_COL32(0, 0, 0, q.paused ? 170 : 130));
+        draw->AddRect(a, b, q.paused ? ColWarn : ColSelect, 10.0f, 0, 2.0f);
+        if (q.paused)
+        {
+            const ImVec2 t = Measure(Font().bold, 13.0f, "PAUSED");
+            Put(draw, Font().bold, 13.0f, ImVec2((a.x + b.x - t.x) * 0.5f, (a.y + b.y - t.y) * 0.5f), ColWarn, "PAUSED");
+        }
+    }
+    else
+        DrawClock(draw, a, b, 0.0f, IM_COL32(0, 0, 0, 90)); // waiting its turn
+    if (q.count > 1 || !q.active)
+    {
+        char n[16];
+        std::snprintf(n, sizeof(n), "x%d", q.count);
+        const ImVec2 t = Measure(Font().bold, 13.0f, n);
+        draw->AddRectFilled(ImVec2(b.x - t.x - 12.0f, a.y + 4.0f), ImVec2(b.x - 4.0f, a.y + 8.0f + t.y), IM_COL32(20, 24, 30, 230), 5.0f);
+        Put(draw, Font().bold, 13.0f, ImVec2(b.x - t.x - 8.0f, a.y + 6.0f), ColText, n);
+    }
 }
 
 void DrawDeploy(const Snapshot& snap)
@@ -1814,7 +1987,8 @@ void DrawDeploy(const Snapshot& snap)
         }
         ImGui::Spacing();
 
-        // The squads to buy, as tiles.
+        // The squads, as tiles: a click puts one in this base's production queue, a right click takes the last
+        // one out again. The one being built shows its clock, the others how many wait.
         const std::vector<SquadInfo> types = SquadTypes();
         const float tileW = 156.0f, tileH = 50.0f; // compact: the panel and its SUPPORT fit a 720p screen
         for (size_t t = 0; t < types.size(); t++)
@@ -1822,49 +1996,137 @@ void DrawDeploy(const Snapshot& snap)
             if (t % 2 == 1)
                 ImGui::SameLine(0.0f, 10.0f);
             std::string reason;
-            const bool can = CanBuy(s.deployBase, static_cast<int>(t), &reason);
+            const bool can = CanBuy(s.deployBase, static_cast<int>(t), &reason); // could deploy right now
+            const std::string missing = SquadMissing(s.deployBase, static_cast<int>(t));
+            const Queued q = QueuedAt(snap, s.deployBase, static_cast<int>(t), false);
             ImGui::PushID(static_cast<int>(t));
             const ImVec2 at = ImGui::GetCursorScreenPos();
-            const bool pressed = ImGui::InvisibleButton("tile", ImVec2(tileW, tileH));
+            const bool pressed = ImGui::InvisibleButton("tile", ImVec2(tileW, tileH), ImGuiButtonFlags_MouseButtonLeft |
+                                                                                        ImGuiButtonFlags_MouseButtonRight);
+            const bool right = pressed && io.MouseReleased[ImGuiMouseButton_Right];
             const bool hovered = ImGui::IsItemHovered();
             ImDrawList* draw = ImGui::GetWindowDrawList();
             const ImVec2 b(at.x + tileW, at.y + tileH);
-            draw->AddRectFilled(at, b, can ? (hovered ? IM_COL32(60, 78, 102, 255) : IM_COL32(38, 48, 64, 255))
-                                           : IM_COL32(30, 34, 42, 200),
+            const bool locked = !missing.empty();
+            draw->AddRectFilled(at, b, !locked ? (hovered ? IM_COL32(60, 78, 102, 255) : IM_COL32(38, 48, 64, 255))
+                                               : IM_COL32(30, 34, 42, 200),
                                 10.0f);
-            const ImU32 text = can ? ColText : ColMuted;
+            const ImU32 text = !locked ? ColText : ColMuted;
             Put(draw, Font().bold, 14.0f, ImVec2(at.x + 12.0f, at.y + 7.0f), text, types[t].name.c_str());
-            char line[64];
-            std::snprintf(line, sizeof(line), "%d soldiers", types[t].size);
+            char line[96];
+            if (locked)
+                std::snprintf(line, sizeof(line), "needs %s", missing.c_str());
+            else
+                std::snprintf(line, sizeof(line), "%d soldiers, %.0f s", types[t].size, SquadBuildSeconds(static_cast<int>(t)));
             Put(draw, Font().body, 12.0f, ImVec2(at.x + 12.0f, at.y + 28.0f), ColMuted, line);
             std::snprintf(line, sizeof(line), "%.0f", types[t].cost);
             const ImVec2 ct = Measure(Font().display, 16.0f, line);
-            Put(draw, Font().display, 16.0f, ImVec2(b.x - ct.x - 10.0f, b.y - ct.y - 6.0f), can ? ColGood : ColBad, line);
-            // Short of supplies or a quiet base, a click still orders it: the order waits (2 min) and deploys when it can.
-            if (pressed)
+            Put(draw, Font().display, 16.0f, ImVec2(b.x - ct.x - 10.0f, b.y - ct.y - 6.0f), locked ? ColBad : ColGood, line);
+            DrawQueued(draw, at, b, q);
+            if (pressed && right)
             {
-                std::string refused;
-                const int id = BuySquad(s.deployBase, static_cast<int>(t), &refused);
-                if (id < 0) // multiplayer: asked of the server, which answers on the radio
-                    SetStatus(types[t].name + " requested at " + snap.war.defs[s.deployBase].name + ".");
-                else if (id)
-                {
-                    St().selected = {id};
-                    SetStatus(types[t].name + " deployed at " + snap.war.defs[s.deployBase].name + "  -  " +
-                              CallsignFull(id) + " awaits your orders");
-                }
-                else if (refused.rfind("queued", 0) == 0)
-                    SetStatus(types[t].name + " " + refused, ColWarn);
-                else
-                    SetStatus("Cannot deploy: " + refused, ColWarn);
+                if (q.count > 0 && CancelAt(s.deployBase, static_cast<int>(t), false))
+                    SetStatus(types[t].name + " cancelled at " + snap.war.defs[s.deployBase].name + ": its supplies are back.", ColMuted);
             }
-            if (hovered && !can)
+            else if (pressed)
+            {
+                const std::string why = QueueAt(s.deployBase, static_cast<int>(t), false);
+                if (why.empty())
+                    SetStatus(types[t].name + " in production at " + snap.war.defs[s.deployBase].name + "  -  right click cancels");
+                else
+                    SetStatus("Cannot build: " + why, ColWarn);
+            }
+            if (hovered)
             {
                 ImGui::BeginTooltip();
-                ImGui::TextUnformatted(("Not now: " + reason + ". Click to queue it: it deploys when it can.").c_str());
+                if (locked)
+                    ImGui::TextUnformatted(("Needs " + missing + " at this base: build it under STRUCTURES.").c_str());
+                else if (q.active && q.paused)
+                    ImGui::TextUnformatted(("Paused: " + q.why + ". It goes on by itself.").c_str());
+                else if (!can && q.count == 0)
+                    ImGui::TextUnformatted(("Click to build: paid as it is built. Now: " + reason + ".").c_str());
+                else
+                    ImGui::TextUnformatted("Click to build one more (paid as it is built); right click cancels the last.");
                 ImGui::EndTooltip();
             }
             ImGui::PopID();
+        }
+        ImGui::Spacing();
+        Heading("STRUCTURES");
+        ImGui::Spacing();
+        {
+            const std::vector<StructureType> kinds = StructureTypes();
+            for (size_t k = 0; k < kinds.size(); k++)
+            {
+                if (k % 2 == 1)
+                    ImGui::SameLine(0.0f, 10.0f);
+                const int kind = static_cast<int>(k);
+                const bool stands = std::any_of(snap.structures.begin(), snap.structures.end(),
+                                                [&](const StructureInfo& st) { return st.base == s.deployBase && st.kind == kind; });
+                const Queued q = QueuedAt(snap, s.deployBase, kind, true);
+                ImGui::PushID(100 + kind);
+                const ImVec2 at = ImGui::GetCursorScreenPos();
+                const bool pressed = ImGui::InvisibleButton("structure", ImVec2(tileW, tileH),
+                                                            ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+                const bool right = pressed && io.MouseReleased[ImGuiMouseButton_Right];
+                const bool hovered = ImGui::IsItemHovered();
+                ImDrawList* draw = ImGui::GetWindowDrawList();
+                const ImVec2 b(at.x + tileW, at.y + tileH);
+                const bool placingThis = s.placeBase == s.deployBase && s.placeKind == kind;
+                draw->AddRectFilled(at, b,
+                                    q.placing ? WithAlpha(ColGood, placingThis ? 0.45f : 0.25f)
+                                    : stands  ? IM_COL32(30, 44, 36, 230)
+                                              : (hovered ? IM_COL32(60, 78, 102, 255) : IM_COL32(38, 48, 64, 255)),
+                                    10.0f);
+                Put(draw, Font().bold, 14.0f, ImVec2(at.x + 12.0f, at.y + 7.0f), ColText, kinds[k].name.c_str());
+                char line[96];
+                if (stands)
+                    std::snprintf(line, sizeof(line), "stands here");
+                else if (q.placing)
+                    std::snprintf(line, sizeof(line), placingThis ? "click where it stands" : "READY: click to place");
+                else
+                    std::snprintf(line, sizeof(line), "%.0f s", kinds[k].seconds);
+                Put(draw, Font().body, 12.0f, ImVec2(at.x + 12.0f, at.y + 28.0f), stands ? ColGood : q.placing ? ColText : ColMuted, line);
+                if (!stands)
+                {
+                    std::snprintf(line, sizeof(line), "%.0f", kinds[k].cost);
+                    const ImVec2 ct = Measure(Font().display, 16.0f, line);
+                    Put(draw, Font().display, 16.0f, ImVec2(b.x - ct.x - 10.0f, b.y - ct.y - 6.0f), ColGood, line);
+                }
+                if (!q.placing)
+                    DrawQueued(draw, at, b, q);
+                if (pressed && right)
+                {
+                    if (q.count > 0 && CancelAt(s.deployBase, kind, true))
+                        SetStatus(kinds[k].name + " cancelled: its supplies are back.", ColMuted);
+                    if (placingThis)
+                        s.placeBase = s.placeKind = -1;
+                }
+                else if (pressed && q.placing)
+                {
+                    s.placeBase = s.deployBase;
+                    s.placeKind = kind;
+                    SetStatus("Click inside " + snap.war.defs[s.deployBase].name + " where the " + kinds[k].name +
+                                  " stands. Right click cancels.",
+                              ColWarn);
+                }
+                else if (pressed && !stands)
+                {
+                    const std::string why = QueueAt(s.deployBase, kind, true);
+                    SetStatus(why.empty() ? kinds[k].name + " under construction at " + snap.war.defs[s.deployBase].name
+                                          : "Cannot build: " + why,
+                              why.empty() ? ColGood : ColWarn);
+                }
+                if (hovered)
+                {
+                    ImGui::BeginTooltip();
+                    ImGui::TextUnformatted(("Lets this base build " + kinds[k].unlocks + ".").c_str());
+                    if (q.active && q.paused)
+                        ImGui::TextUnformatted(("Paused: " + q.why + ". It goes on by itself.").c_str());
+                    ImGui::EndTooltip();
+                }
+                ImGui::PopID();
+            }
         }
         ImGui::Spacing();
         Heading("SUPPORT");
@@ -1893,6 +2155,8 @@ void DrawDeploy(const Snapshot& snap)
             const ImVec2 ct = Measure(Font().display, 16.0f, line);
             Put(draw, Font().display, 16.0f, ImVec2(at.x + w - ct.x - 10.0f, at.y + h - ct.y - 6.0f),
                 snap.war.pool[me] >= b.cost ? ColGood : ColBad, line);
+            if (b.cooldownLeft > 0.0f && b.cooldown > 0.0f)
+                DrawClock(draw, at, ImVec2(at.x + w, at.y + h), 1.0f - b.cooldownLeft / b.cooldown, IM_COL32(0, 0, 0, 130));
             if (pressed)
             {
                 if (s.targeting && !s.targetAir)
@@ -1935,6 +2199,8 @@ void DrawDeploy(const Snapshot& snap)
             const ImVec2 ct = Measure(Font().display, 16.0f, line);
             Put(draw, Font().display, 16.0f, ImVec2(at.x + w - ct.x - 10.0f, at.y + h - ct.y - 6.0f),
                 snap.war.pool[me] >= a.cost ? ColGood : ColBad, line);
+            if (a.cooldownLeft > 0.0f && a.cooldown > 0.0f)
+                DrawClock(draw, at, ImVec2(at.x + w, at.y + h), 1.0f - a.cooldownLeft / a.cooldown, IM_COL32(0, 0, 0, 130));
             if (pressed)
             {
                 if (s.targeting && s.targetAir)
@@ -2376,6 +2642,19 @@ void DrawSetup()
         ImGui::SameLine();
         if (ImGui::RadioButton("Veterans", o.aiSkill == 2))
             o.aiSkill = 2;
+        Label(Font().body, 13.0f, ColMuted, "Weather");
+        {
+            static const char* names[] = {"Mission's", "Clear", "Cloudy", "Overcast", "Rain", "Fog", "Changing"};
+            for (int w = 0; w < 7; w++)
+            {
+                if (w != 0 && w != 4)
+                    ImGui::SameLine();
+                if (ImGui::RadioButton(names[w], o.weather == w))
+                    o.weather = w;
+            }
+            if (o.weather == 6)
+                Label(Font().body, 12.0f, ColMuted, "Changes slowly as the war goes: a step at a time, over twenty minutes.");
+        }
         ImGui::Checkbox("Taking control of any of your soldiers", &o.possession);
         ImGui::Checkbox("HQ radios its orders", &o.hqRadio);
         ImGui::Spacing();
@@ -2491,6 +2770,30 @@ void DrawBaseCard(const Snapshot& snap)
             else
                 std::snprintf(line, sizeof(line), "Supplies: %.0f   (deploying and the arsenal spend them)", st.stock);
             Label(Font().bold, 14.0f, ColText, line);
+            // What stands here, what is being built, and who brings supplies.
+            {
+                const std::vector<StructureType> kinds = StructureTypes();
+                std::string stands;
+                for (const StructureInfo& si : snap.structures)
+                    if (si.base == o && si.kind >= 0 && si.kind < static_cast<int>(kinds.size()))
+                        stands += (stands.empty() ? "" : ", ") + kinds[si.kind].name;
+                Label(Font().body, 13.0f, ColMuted, ("Stands here: " + (stands.empty() ? std::string("nothing yet (DEPLOY -> STRUCTURES)") : stands)).c_str());
+                int building = 0;
+                for (const BuildInfo& bi : snap.builds)
+                    if (bi.base == o)
+                        building++;
+                if (building > 0)
+                    Label(Font().body, 13.0f, ColMuted, ("In production: " + std::to_string(building)).c_str());
+                std::string trucks;
+                ForEachGroup(
+                    [&](const LiveGroup& g)
+                    {
+                        if (g.side == me && g.role == "supply" && g.hasDest && std::hypot(g.destX - d.x, g.destY - d.y) < d.radius + 60.0f)
+                            trucks += (trucks.empty() ? "" : "; ") + g.doing;
+                    });
+                Label(Font().body, 13.0f, trucks.empty() ? ColMuted : ColGood,
+                      ("Supply line: " + (trucks.empty() ? std::string("no truck on its way") : trucks)).c_str());
+            }
             if (ImGui::Button("Deploy here"))
             {
                 s.deployOpen = true;
@@ -3121,7 +3424,9 @@ bool ProcessEvent(const SDL_Event& event)
                 return true;
             if (event.button.button == SDL_BUTTON_LEFT)
             {
-                if (s.targeting)
+                if (s.placeKind >= 0)
+                    PlaceAtPointer(event.button.x, event.button.y);
+                else if (s.targeting)
                     FireBarrageAt(event.button.x, event.button.y);
                 else if ((SDL_GetModState() & SDL_KMOD_CTRL) != 0)
                     s.dragPan = true;
@@ -3142,7 +3447,12 @@ bool ProcessEvent(const SDL_Event& event)
             }
             else if (event.button.button == SDL_BUTTON_RIGHT)
             {
-                if (s.targeting)
+                if (s.placeKind >= 0)
+                {
+                    s.placeBase = s.placeKind = -1;
+                    SetStatus("Not placed: it waits, ready, in DEPLOY -> STRUCTURES.", ColMuted);
+                }
+                else if (s.targeting)
                 {
                     s.targeting = false;
                     SetStatus(s.targetEngage ? "No target: they fire at will." : "Barrage cancelled.", ColMuted);
@@ -3317,6 +3627,7 @@ void Frame()
     ImDrawList* draw = ImGui::GetBackgroundDrawList();
     DrawShroud(draw);
     DrawObjectives(draw);
+    DrawSupplyLines(draw);
     // Enemy symbols only with the setup's option (off by default): otherwise the enemy is what the
     // commander sees of the real units.
     if (GetOptions().enemyMarkers)
@@ -3386,8 +3697,83 @@ static GameValue ConquestCameraStateNular(const GameState* gs)
     return out;
 }
 
+// conquestQueue [base, type, structure]: the deploy panel's click (base and type as indices); "" when queued.
+static GameValue ConquestQueueUnary(const GameState*, GameValuePar oper1)
+{
+    const GameArrayType& a = oper1;
+    if (a.Size() < 2)
+        return GameValue(RString("no base and type"));
+    const bool structure = a.Size() > 2 && a[2].GetType() == GameBool && static_cast<bool>(a[2]);
+    return GameValue(RString(Poseidon::Conquest::QueueAt(static_cast<int>(static_cast<float>(a[0])),
+                                                         static_cast<int>(static_cast<float>(a[1])), structure).c_str()));
+}
+
+// conquestCancel [base, type, structure]: the deploy panel's right click; true when one was taken out.
+static GameValue ConquestCancelUnary(const GameState*, GameValuePar oper1)
+{
+    const GameArrayType& a = oper1;
+    if (a.Size() < 2)
+        return GameValue(false);
+    const bool structure = a.Size() > 2 && a[2].GetType() == GameBool && static_cast<bool>(a[2]);
+    return GameValue(Poseidon::Conquest::CancelAt(static_cast<int>(static_cast<float>(a[0])), static_cast<int>(static_cast<float>(a[1])),
+                                                  structure));
+}
+
+// conquestPlace [base, kind, x, y]: the commander's click for a built structure; "" when it stands.
+static GameValue ConquestPlaceUnary(const GameState*, GameValuePar oper1)
+{
+    const GameArrayType& a = oper1;
+    if (a.Size() < 4)
+        return GameValue(RString("no base, kind and point"));
+    return GameValue(RString(Poseidon::Conquest::PlaceAt(static_cast<int>(static_cast<float>(a[0])), static_cast<int>(static_cast<float>(a[1])),
+                                                         static_cast<float>(a[2]), static_cast<float>(a[3])).c_str()));
+}
+
+// conquestBuilds: the player's side's production, [[base, type, structure, progress, paused, placing], ...].
+static GameValue ConquestBuildsNular(const GameState* gs)
+{
+    GameValue out = gs->CreateGameValue(GameArray);
+    GameArrayType& list = out;
+    for (const Poseidon::Conquest::BuildInfo& b : Poseidon::Conquest::GetSnapshot().builds)
+    {
+        GameValue e = gs->CreateGameValue(GameArray);
+        GameArrayType& ea = e;
+        ea.Add(GameValue(static_cast<float>(b.base)));
+        ea.Add(GameValue(static_cast<float>(b.type)));
+        ea.Add(GameValue(b.structure));
+        ea.Add(GameValue(b.progress));
+        ea.Add(GameValue(b.paused));
+        ea.Add(GameValue(b.placing));
+        list.Add(e);
+    }
+    return out;
+}
+
+// conquestStructures: what stands at the bases, [[base, kind, x, y], ...].
+static GameValue ConquestStructuresNular(const GameState* gs)
+{
+    GameValue out = gs->CreateGameValue(GameArray);
+    GameArrayType& list = out;
+    for (const Poseidon::Conquest::StructureInfo& st : Poseidon::Conquest::GetSnapshot().structures)
+    {
+        GameValue e = gs->CreateGameValue(GameArray);
+        GameArrayType& ea = e;
+        ea.Add(GameValue(static_cast<float>(st.base)));
+        ea.Add(GameValue(static_cast<float>(st.kind)));
+        ea.Add(GameValue(st.x));
+        ea.Add(GameValue(st.y));
+        list.Add(e);
+    }
+    return out;
+}
+
 INIT_MODULE(ConquestView, 3)
 {
+    GGameState.NewFunction(GameFunction(GameString, "conquestQueue", ConquestQueueUnary, GameArray));
+    GGameState.NewFunction(GameFunction(GameString, "conquestPlace", ConquestPlaceUnary, GameArray));
+    GGameState.NewFunction(GameFunction(GameBool, "conquestCancel", ConquestCancelUnary, GameArray));
+    GGameState.NewNularOp(GameNular(GameArray, "conquestBuilds", ConquestBuildsNular));
+    GGameState.NewNularOp(GameNular(GameArray, "conquestStructures", ConquestStructuresNular));
     GGameState.NewNularOp(GameNular(GameArray, "conquestCameraState", ConquestCameraStateNular));
     GGameState.NewFunction(GameFunction(GameBool, "conquestCamera", ConquestCameraUnary, GameArray));
     GGameState.NewFunction(GameFunction(GameBool, "conquestCommanderView", ConquestCommanderViewUnary, GameBool));

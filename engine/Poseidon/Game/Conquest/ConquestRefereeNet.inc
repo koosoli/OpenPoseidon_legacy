@@ -76,6 +76,114 @@ std::string Str(const GameArrayType& a, int i)
 
 // ---- the server: what it publishes ----
 
+// The production queues (index 14 of conquestNet) and the structures (15), for the clients' deploy panel
+// and map: [side, base, type, structure, paid, paused, placing, why] and [base, kind, object].
+GameValue BuildsNet(const Referee& r)
+{
+    GameValue list = NetArray();
+    GameArrayType& la = list;
+    for (const Build& b : r.builds)
+    {
+        GameValue e = NetArray();
+        GameArrayType& ea = e;
+        ea.Add(GameValue(static_cast<float>(b.side)));
+        ea.Add(GameValue(static_cast<float>(b.base)));
+        ea.Add(GameValue(static_cast<float>(b.type)));
+        ea.Add(GameValue(b.structure));
+        ea.Add(GameValue(b.paid));
+        ea.Add(GameValue(b.paused));
+        ea.Add(GameValue(b.placing));
+        ea.Add(GameValue(RString(b.why.c_str())));
+        la.Add(e);
+    }
+    return list;
+}
+
+GameValue StructuresNet(const Referee& r)
+{
+    GameValue list = NetArray();
+    GameArrayType& la = list;
+    for (const Structure& st : r.structures)
+    {
+        GameValue e = NetArray();
+        GameArrayType& ea = e;
+        ea.Add(GameValue(static_cast<float>(st.base)));
+        ea.Add(GameValue(static_cast<float>(st.kind)));
+        ea.Add(GameValueExt(static_cast<Object*>(st.object.GetLink())));
+        la.Add(e);
+    }
+    return list;
+}
+
+void ReadBuildsNet(Referee& r, const GameValue& builds, const GameValue& structures)
+{
+    if (builds.GetType() == GameArray)
+    {
+        r.builds.clear();
+        const GameArrayType& la = builds;
+        for (int i = 0; i < la.Size(); i++)
+        {
+            const GameArrayType& e = la[i];
+            Build b;
+            b.side = static_cast<int>(Num(e, 0, NoSide));
+            b.base = static_cast<int>(Num(e, 1, -1));
+            b.type = static_cast<int>(Num(e, 2, -1));
+            b.structure = Flag(e, 3);
+            b.paid = Num(e, 4);
+            b.paused = Flag(e, 5);
+            b.placing = Flag(e, 6);
+            b.why = Str(e, 7);
+            const bool known = b.base >= 0 && b.base < static_cast<int>(r.war.defs.size()) && b.type >= 0 &&
+                               (b.structure ? b.type < StructureCount : b.type < static_cast<int>(r.config.squads.size()));
+            if (known)
+                r.builds.push_back(b);
+        }
+    }
+    if (structures.GetType() == GameArray)
+    {
+        r.structures.clear();
+        const GameArrayType& la = structures;
+        for (int i = 0; i < la.Size(); i++)
+        {
+            const GameArrayType& e = la[i];
+            Structure st;
+            st.base = static_cast<int>(Num(e, 0, -1));
+            st.kind = static_cast<int>(Num(e, 1, -1));
+            if (e.Size() > 2)
+                st.object = dyn_cast<EntityAI>(GetObject(e[2]));
+            if (st.base >= 0 && st.kind >= 0 && st.kind < StructureCount)
+                r.structures.push_back(st);
+        }
+    }
+}
+
+// A client's production orders: build a squad or a structure, cancel one, put a built structure up.
+bool BuildRequest(Referee& r, int side, const std::string& kind, const GameArrayType& args)
+{
+    if (kind == "buy" && args.Size() >= 2)
+    {
+        const std::string why = QueueBuild(r, side, static_cast<int>(Num(args, 0, -1)), static_cast<int>(Num(args, 1, -1)),
+                                           args.Size() > 2 && Flag(args, 2), true);
+        if (!why.empty())
+            Radio(r, side, "Commander, that cannot be built: " + why + ".");
+        return true;
+    }
+    if (kind == "cancel" && args.Size() >= 3)
+    {
+        CancelBuild(r, side, static_cast<int>(Num(args, 0, -1)), static_cast<int>(Num(args, 1, -1)), Flag(args, 2));
+        return true;
+    }
+    if (kind == "place" && args.Size() >= 4)
+    {
+        const std::string why = PlaceBuilt(r, side, static_cast<int>(Num(args, 0, -1)), static_cast<int>(Num(args, 1, -1)),
+                                           Num(args, 2), Num(args, 3));
+        if (!why.empty())
+            Radio(r, side, "Commander, it cannot stand there: " + why + ".");
+        return true;
+    }
+    return false;
+}
+
 void Publish(Referee& r, float now)
 {
     GameState* gs = GWorld->GetGameState();
@@ -230,6 +338,8 @@ void Publish(Referee& r, float now)
     a.Add(GameValue(RString(r.winReason.c_str())));
     a.Add(GameValue(r.options.resistanceAlly));
     a.Add(GameValue(TimeLeft()));
+    a.Add(BuildsNet(r));
+    a.Add(StructuresNet(r));
 
     gs->VarSet("conquestNet", root);
     GetNetworkManager().PublicVariable("conquestNet");
@@ -418,6 +528,8 @@ void ReadNet(Referee& r)
     r.snapshot.log.clear();
     for (int i = 0; i < la.Size(); i++)
         r.snapshot.log.push_back(Str(la, i));
+    if (a.Size() > 15)
+        ReadBuildsNet(r, a[14], a[15]);
 }
 
 // What this client's player asks the server to do for their side.

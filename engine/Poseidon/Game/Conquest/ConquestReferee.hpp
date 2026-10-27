@@ -46,6 +46,26 @@ struct GroupSummary
     float y = 0.0f;
 };
 
+/// One order in production at a base: the deploy panel draws its clock.
+struct BuildInfo
+{
+    int base = -1;
+    int type = -1;          // a squad type, or a structure (StructureTypes) when `structure`
+    bool structure = false;
+    bool active = false;    // the first in its base's queue: its clock runs
+    float progress = 0.0f;  // 0..1, paid as it goes
+    bool paused = false;    // short of supplies or men, or ready and the base not quiet
+    bool placing = false;   // a structure built: the commander clicks where it stands
+    std::string why;        // what it waits for
+};
+/// A structure standing at a base (barracks tent, motor pool, helipad).
+struct StructureInfo
+{
+    int base = -1;
+    int kind = -1;
+    float x = 0.0f, y = 0.0f;
+};
+
 /// What the referee shows the outside (dev tab, conquestState): a copy refreshed every tick.
 struct Snapshot
 {
@@ -60,7 +80,9 @@ struct Snapshot
     int cap = 0;
     int winner = NoSide;
     std::string winReason; // "holds 9 villages", "the war score"
-    int queuedPurchases = 0; // the player's side: purchases waiting for supplies or a quiet base
+    int queuedPurchases = 0; // the player's side: orders in production at its bases
+    std::vector<BuildInfo> builds;          // ... those orders, every base's queue in order
+    std::vector<StructureInfo> structures;  // what stands at the bases, every side's
     std::vector<GroupSummary> groups;
     std::deque<std::string> log; // newest last
     float lastTickMs = 0.0f;
@@ -168,6 +190,28 @@ bool CanBuy(int base, int type, std::string* reason = nullptr);
 /// Buy it: the squad spawns at the base and waits there for orders. Returns its id, 0 if refused.
 int BuySquad(int base, int type, std::string* reason = nullptr);
 
+// ---- production (ConquestRefereeBuild.inc): squads and structures are built at a base, one at a time,
+// paid as their clock runs; short of supplies the clock waits ----
+struct StructureType
+{
+    std::string name;
+    float cost = 0.0f;
+    float seconds = 0.0f;
+    std::string unlocks; // what it lets the base build
+};
+/// The structures a base can build: barracks tent, motor pool, helipad (indices are BuildInfo::type).
+std::vector<StructureType> StructureTypes();
+/// Seconds squad type `type` takes to build.
+float SquadBuildSeconds(int type);
+/// "" when base `base` has what squad type `type` needs, else what it lacks ("a Barracks tent").
+std::string SquadMissing(int base, int type);
+/// Queue a squad (or a structure) at `base` for the player's side: "" when queued, else why not.
+std::string QueueAt(int base, int type, bool structure);
+/// Cancel the last queued one of these at `base`; what it paid goes back to the base.
+bool CancelAt(int base, int type, bool structure);
+/// Put a built structure up at (x, y) inside its base: "" when it stands, else why not.
+std::string PlaceAt(int base, int kind, float x, float y);
+
 struct Contact
 {
     float x = 0.0f, y = 0.0f, height = 0.0f; // height: above sea level (the view draws at it)
@@ -226,6 +270,7 @@ struct Options
     bool resistanceAlly = false;   // the Resistance fights with WEST (with resistance on)
     bool enemyMarkers = false;     // the enemy the side knows of, as symbols in the command view and its minimap
     int aiSkill = 1;               // the AI soldiers: 0 recruits, 1 regulars, 2 veterans
+    int weather = 0;               // 0 the mission's, 1 clear, 2 cloudy, 3 overcast, 4 rain, 5 fog, 6 changing slowly
     std::array<std::string, MaxSides> llmModel; // an LLM commander's own model ("": the AI & voice panel's)
 };
 
@@ -295,6 +340,7 @@ struct BarrageInfo
     float cost = 0.0f;
     int shells = 0;
     float cooldownLeft = 0.0f; // seconds of game time until the mortars are ready again
+    float cooldown = 0.0f;     // ... out of this many (the reload, or the war's first minutes): the icon's clock
 };
 BarrageInfo Barrage();
 /// A mortar barrage on (x, y) for the player's side. False with a reason when it cannot be fired.
@@ -308,6 +354,7 @@ struct AirStrikeInfo
     int bombs = 0;
     float spread = 0.0f;
     float cooldownLeft = 0.0f;
+    float cooldown = 0.0f; // the whole wait cooldownLeft counts down: the icon's clock
     bool inbound = false; // a plane is on its way
 };
 AirStrikeInfo AirStrike();

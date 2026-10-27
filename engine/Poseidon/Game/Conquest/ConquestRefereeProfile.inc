@@ -23,6 +23,7 @@ void SaveSettings(const Options& o)
     cJSON_AddNumberToObject(root, "victoryTowns", o.victoryTowns);
     cJSON_AddNumberToObject(root, "timeLimit", o.timeLimit);
     cJSON_AddNumberToObject(root, "aiSkill", o.aiSkill);
+    cJSON_AddNumberToObject(root, "weather", o.weather);
     cJSON* sides = cJSON_AddArrayToObject(root, "sides");
     for (int s = 0; s < MaxSides; s++)
     {
@@ -80,6 +81,7 @@ bool LoadSettings(Options& o, int sideCount)
     o.victoryTowns = std::max(0, static_cast<int>(number("victoryTowns", static_cast<float>(o.victoryTowns))));
     o.timeLimit = std::max(0, static_cast<int>(number("timeLimit", static_cast<float>(o.timeLimit))));
     o.aiSkill = std::clamp(static_cast<int>(number("aiSkill", static_cast<float>(o.aiSkill))), 0, 2);
+    o.weather = std::clamp(static_cast<int>(number("weather", static_cast<float>(o.weather))), 0, 6);
     if (const cJSON* sides = cJSON_GetObjectItemCaseSensitive(root, "sides"); cJSON_IsArray(sides))
     {
         int s = 0;
@@ -101,4 +103,20 @@ bool LoadSettings(Options& o, int sideCount)
     }
     cJSON_Delete(root);
     return true;
+}
+
+// Multiplayer has no setup screen: the host picks the war's settings in the game's own lobby, as the
+// mission's parameters (description.ext titleParam1/2), and the server sets param1 and param2 before the
+// war begins: param1 the supplies each side starts with, param2 the time limit in minutes (0: none).
+// Without them (a mission that defines none) the mission's defaults stand.
+void ApplyLobbyParams(Options& o)
+{
+    GameState* gs = GWorld ? GWorld->GetGameState() : nullptr;
+    if (!gs)
+        return;
+    const GameValue p1 = gs->VarGet("param1"), p2 = gs->VarGet("param2");
+    if (p1.GetType() == GameScalar && static_cast<float>(p1) > 0.0f && static_cast<float>(p1) <= 100000.0f)
+        o.startPool.fill(static_cast<float>(p1));
+    if (p2.GetType() == GameScalar && static_cast<float>(p2) >= 0.0f && static_cast<float>(p2) <= 1440.0f)
+        o.timeLimit = static_cast<int>(static_cast<float>(p2));
 }

@@ -206,6 +206,9 @@ Vector3 ParkingSlot(Referee& r, int side, int o, bool big)
         if (h < 3.0f || std::abs(h - baseHeight) > 8.0f || std::max(std::abs(sx), std::abs(sy)) > 0.15f * 12.0f)
             return false;
         const float clear = big ? 20.0f : 12.0f;
+        for (const Structure& st : r.structures)
+            if (const EntityAI* o = st.object; o && std::hypot(o->Position().X() - x, o->Position().Z() - y) < clear + 8.0f)
+                return false; // a tent or a shed stands here
         return std::none_of(r.units.begin(), r.units.end(),
                             [&](const UnitRecord& u)
                             {

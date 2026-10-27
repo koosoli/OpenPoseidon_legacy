@@ -9,9 +9,9 @@ class CfgConquest
     sides[] = {"WEST", "EAST", "GUER"};
     resistance = 0;
     startPool = 2000;  // each side, on top of its starting squads (the setup screen sets each side's)
-    // Free, at each HQ when the war begins: three squads, two tanks, a helicopter with its squad and a
+    // Free, at each HQ when the war begins: three squads, five tanks, a helicopter with its squad and a
     // supply truck.
-    startSquads[] = {"Motorised", "Rifle", "Recon", "Armour", "Armour", "AirAssault", "Supply"};
+    startSquads[] = {"Motorised", "Rifle", "Recon", "Armour", "Armour", "Armour", "Armour", "Armour", "AirAssault", "Supply"};
     cap = 80;          // living soldiers per side (160 alive: about 1 ms of AI a tick, measured 2026-10-26)
     capThreeSides = 55; // per side with the Resistance in: the same total
     timeLimit = 0;     // minutes; then the higher war score wins (0: off; the setup screen sets it)

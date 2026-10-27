@@ -1,5 +1,5 @@
 // Conquest: the Everon war from its own mission folder, both sides on the AI. The setup screen's Start
-// (conquestStart) begins it, each side's seven starting squads deploy at its HQ, and minutes later both
+// (conquestStart) begins it, each side's ten starting squads deploy at its HQ, and minutes later both
 // sides still hold ground and field soldiers. conquestStats = [started, ended, sides, squads,
 // [soldiers alive per side], [objectives held per side]].
 triSetLanguage "English"
@@ -14,7 +14,7 @@ triSimFrames 120
 _s = conquestStats
 triAssertEq [(_s select 0), true]
 triAssertEq [(_s select 2), 2]
-triAssertGe [(_s select 3), 14] // seven squads a side, and the AI buys at once
+triAssertGe [(_s select 3), 20] // ten squads a side, and the AI buys at once
 triAssertGt [((_s select 4) select 0), 20]
 triAssertGt [((_s select 4) select 1), 20]
 

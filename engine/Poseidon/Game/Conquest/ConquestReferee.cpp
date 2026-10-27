@@ -3,6 +3,7 @@
 #include <Poseidon/Game/Conquest/ConquestView.hpp>
 #include <Poseidon/Game/Conquest/ConquestLlm.hpp>
 #include <Poseidon/Dev/NpcChat/NpcChat.hpp>
+#include <Random/randomGen.hpp>
 
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AICenter.hpp>
@@ -178,16 +179,26 @@ struct Config
     bool optionalLast = false;                        // the last of three sides joins only when the setup says so
 };
 
-// A purchase the player's side could not make yet (no supplies, enemies at the base): it is made
-// as soon as it can be, or dropped after QueueSeconds.
-struct QueuedBuy
+// One order in a base's production queue (ConquestRefereeBuild.inc): a squad, or a structure for the base.
+struct Build
 {
     int side = NoSide;
     int base = -1;
-    int type = 0;
-    float until = 0.0f;
+    int type = -1;          // into Config::squads, or StructureDefs when `structure`
+    bool structure = false;
+    bool human = false;     // the commander's order (his squads wait for orders, his structures for his click)
+    float paid = 0.0f;      // supplies paid so far: the clock's hand
+    bool paused = false;    // short of supplies or men, or ready and the base not quiet: it waits
+    bool placing = false;   // a built structure waiting for the commander's click
+    std::string why;        // what it waits for
 };
-constexpr float QueueSeconds = 120.0f;
+// A structure standing at a base: it serves whoever holds the base.
+struct Structure
+{
+    int base = -1;
+    int kind = -1;
+    OLink<EntityAI> object;
+};
 
 // An air strike on its way: the plane, its pilot's group, the point, and where it leaves by.
 struct Strike
@@ -202,7 +213,6 @@ struct Strike
     float droppedAt = 0.0f;
     Vector3 exit;
 };
-constexpr size_t QueueMax = 4;
 
 // A line of HQ's radio, kept for the clients in multiplayer.
 struct NetRadio
@@ -245,7 +255,6 @@ struct Referee
     War war;
     std::vector<GroupRecord> groups;
     std::vector<UnitRecord> units;
-    std::map<int, float> aiBoughtAt; // objective -> when an AI commander last bought a squad there
     std::array<float, MaxSides> lastPlan{};
     std::array<bool, MaxSides> replan{};
     std::array<int, MaxSides> live{};
@@ -268,9 +277,12 @@ struct Referee
     int shroudSize = 0;
     std::array<float, MaxSides> lastBarrage{-1.0e9f, -1.0e9f, -1.0e9f};
     std::vector<PendingShell> shells;
-    std::vector<QueuedBuy> buyQueue;
+    std::vector<Build> builds;         // every base's production queue, in order
+    std::vector<Structure> structures; // what stands at the bases
     std::vector<Strike> strikes;
     float warStart = -1.0f; // game time the war began (the time limit counts from it)
+    int weatherNow = 0;     // the weather the sky is in or turning to (ConquestRefereeWeather.inc) ...
+    float weatherNext = 0.0f; // ... and when a changing one turns next
     float netTimeLeft = -1.0f;
     std::array<float, MaxSides> lastAir{-1.0e9f, -1.0e9f, -1.0e9f};
     std::array<float, MaxSides> netAirCooldown{};
@@ -362,6 +374,8 @@ struct Saved
     std::array<int, MaxSides> bought{};
     std::vector<GroupRecord> groups;
     std::vector<UnitRecord> units;
+    std::vector<Build> builds;
+    std::vector<Structure> structures;
     int nextGroupId = 1;
     int playerSide = NoSide;
     OLink<Person> commanderBody;
@@ -399,6 +413,22 @@ float Now();
 bool Human(const Referee& r, int side)
 {
     return side >= 0 && side < MaxSides && Now() < r.humanUntil[side];
+}
+
+// A squad's task is over: the town it attacks is taken (or cannot be attacked any more: off the front, an
+// ally's), the town it defends is lost. Such a squad gets a new task whoever commands the side -- under a
+// human commander the AI left every squad that had a task alone, so squads stood in towns their side had
+// long taken, "attacking" them (owner, 2026-10-26).
+bool TaskOver(const Referee& r, const GroupRecord& rec)
+{
+    if (rec.objective < 0 || rec.objective >= static_cast<int>(r.war.states.size()))
+        return false;
+    const int owner = r.war.states[rec.objective].owner;
+    if (rec.task == TaskKind::Attack)
+        return owner == rec.side || !CanAttack(r.war, rec.side, rec.objective);
+    if (rec.task == TaskKind::Defend)
+        return owner != rec.side;
+    return false;
 }
 
 // A bar that is neither full for its owner nor an untouched neutral: someone is taking it.
@@ -788,6 +818,7 @@ bool LoadConfig(Referee& r, const ParamEntry& cfg)
         r.setupPending = false;
         r.options.possession = false;
         r.options.startInCommand = false;
+        ApplyLobbyParams(r.options); // supplies and time limit, as the host picked them in the lobby
     }
     for (int s = 0; s < MaxSides; s++)
     {
@@ -992,6 +1023,9 @@ bool Heavy(const SquadDef& d)
 {
     return d.role == "armour" || d.role == "gunship" || d.role == "air";
 }
+
+#include "ConquestRefereeBuild.inc"
+#include "ConquestRefereeWeather.inc"
 
 int SpawnSquad(Referee& r, int side, int base, bool free, int type = 0)
 {
@@ -1585,7 +1619,7 @@ SideView BuildView(Referee& r, int side, float now)
         g.task = rec.task;
         g.objective = rec.objective;
         g.stalled = rec.stalled;
-        g.locked = now < rec.lockedUntil || grp->IsAnyPlayerGroup();
+        g.locked = (now < rec.lockedUntil && !TaskOver(r, rec)) || grp->IsAnyPlayerGroup();
         g.avoid = now < rec.avoidUntil ? rec.avoid : -1;
         if (rec.type >= 0 && rec.type < static_cast<int>(r.config.squads.size()))
         {
@@ -1612,7 +1646,7 @@ int ChooseSquadType(const Referee& r, int side, int base)
     {
         const SquadDef& d = r.config.squads[t];
         return d.aiBuys && !d.classes[side].empty() && pool >= d.cost && (heavyHere || !Heavy(d)) &&
-               r.live[side] + static_cast<int>(d.classes[side].size()) <= r.config.cap;
+               r.live[side] + static_cast<int>(d.classes[side].size()) <= r.config.cap && MissingFor(r, base, t).empty();
     };
     // Every fourth purchase is heavy: a tank platoon or a gunship, alternately. They cost a lot, so
     // the commander saves up for one unless the side is short of men.
@@ -1627,7 +1661,8 @@ int ChooseSquadType(const Referee& r, int side, int base)
             {
                 const SquadDef& d = r.config.squads[t];
                 if (d.role != role || !d.aiBuys || d.classes[side].empty() || !heavyHere ||
-                    r.live[side] + static_cast<int>(d.classes[side].size()) > r.config.cap)
+                    r.live[side] + static_cast<int>(d.classes[side].size()) > r.config.cap ||
+                    !MissingFor(r, base, static_cast<int>(t)).empty())
                     continue;
                 if (pool >= d.cost)
                     return static_cast<int>(t);
@@ -1656,6 +1691,7 @@ int ChooseSquadType(const Referee& r, int side, int base)
 }
 
 void AiBarrage(Referee& r, int side, float now);
+void VoiceConfirm(const GroupRecord& rec, bool attack, const std::string& doing);
 bool AirStrikeFor(Referee& r, int side, float x, float y, std::string* reason);
 
 void Plan(Referee& r, int side, float now)
@@ -1683,11 +1719,14 @@ void Plan(Referee& r, int side, float now)
     // player commands (from the first tick, with the commander view on) had no supply runs at all (owner,
     // 2026-10-26). The commander can still buy more, pin them, or put squads on supply runs.
     KeepSupplyTrucks(r, side, now);
+    if (!Human(r, side))
+        AiBuildStructures(r, side);
     // Fire support before purchases: called after them, it found the pool spent on squads and the AI used
     // its mortars and plane almost never (owner, 2026-10-26: none in an 80-minute soak).
     if (!Human(r, side))
         AiBarrage(r, side, now);
     std::map<std::pair<int, int>, std::vector<int>> radioed; // (task, objective) -> squads newly given it
+    bool voiced = false;
     for (Intent& intent : intents)
     {
         if (intent.kind == Intent::Kind::BuySquad)
@@ -1702,10 +1741,6 @@ void Plan(Referee& r, int side, float now)
                 continue;
             }
             int base = intent.objective;
-            // One squad a base every 30 s: rich at the start, the AI bought a dozen at once and they jammed
-            // the roads out of their HQ (soak, 2026-10-26).
-            if (const auto it = r.aiBoughtAt.find(base); it != r.aiBoughtAt.end() && now >= it->second && now - it->second < 30.0f)
-                continue;
             int type = ChooseSquadType(r, side, base);
             if (type < 0 && base != HqOf(r, side) && HqOf(r, side) >= 0 &&
                 SpawnEligible(r.war, side, HqOf(r, side), now, r.tuning))
@@ -1716,16 +1751,12 @@ void Plan(Referee& r, int side, float now)
             if (type < 0)
                 continue;
             intent.objective = base;
-            if (const auto it = r.aiBoughtAt.find(base); it != r.aiBoughtAt.end() && now >= it->second && now - it->second < 30.0f)
-                continue; // the HQ, taking over from a front base without supplies, bought one just now
-            if (SpawnSquad(r, side, base, false, type))
-            {
-                r.aiBoughtAt[base] = now;
-                WarLog(Name(side) + " bought a " + r.config.squads[type].name + " at " +
-                       r.war.defs[intent.objective].name + " (" + intent.why + ")");
-                if (r.llmBuy[side] == r.config.squads[type].name)
-                    r.llmBuy[side].clear(); // the LLM's purchase is made
-            }
+            // One order at a time at a base: the build queue paces the AI's reinforcements (rich at the
+            // start, it bought a dozen at once and they jammed the roads out of its HQ, soak 2026-10-26).
+            if (BaseBusy(r, side, base))
+                continue;
+            if (QueueBuild(r, side, base, type, false, false).empty() && r.llmBuy[side] == r.config.squads[type].name)
+                r.llmBuy[side].clear(); // the LLM's purchase is ordered
             continue;
         }
         for (GroupRecord& rec : r.groups)
@@ -1734,10 +1765,19 @@ void Plan(Referee& r, int side, float now)
                 continue;
             // No squad idles: one without a task always gets the AI's (attack, take, secure). While a human
             // commands the side the AI only fills in, never re-tasks a squad that has one -- re-tasking busy
-            // squads every plan was what sent them running back and forth (owner, 2026-10-26).
-            if (now < rec.lockedUntil || (Human(r, side) && rec.task != TaskKind::None) ||
+            // squads every plan was what sent them running back and forth (owner, 2026-10-26) -- unless its
+            // task is over (TaskOver): then it gets a new one, the commander's own orders included.
+            const bool over = TaskOver(r, rec);
+            if ((!over && (now < rec.lockedUntil || (Human(r, side) && rec.task != TaskKind::None))) ||
                 (rec.group && rec.group->IsAnyPlayerGroup()))
                 break; // the human commander's order stands, or the player leads this squad
+            const bool commandersOrderDone = over && now < rec.lockedUntil;
+            if (commandersOrderDone)
+            {
+                rec.lockedUntil = -1.0e9f;
+                WarLog("commander's order for " + Callsign(rec.id) + " is over (" + TaskName(rec.task) + " " +
+                       r.war.defs[rec.objective].name + "): the AI gives it a new task");
+            }
             // The task it already has: nothing to do. (A worn-down squad in a rear town was freed and given the
             // same "regrouping" task back on every plan; each re-order planned its path anew and reset its
             // progress, so it was never seen to be stuck -- 39 to 145 times a war.) A stalled squad is ordered
@@ -1756,6 +1796,12 @@ void Plan(Referee& r, int side, float now)
                 Order(rec, r.war.defs[intent.objective], now);
                 WarLog(Name(side) + " group " + std::to_string(rec.id) + ": " + TaskName(intent.task) + " " +
                     r.war.defs[intent.objective].name + " (" + intent.why + ")");
+                // The commander hears where a squad of his goes next (one voice a plan: they would talk over each other).
+                if (commandersOrderDone && !voiced)
+                {
+                    VoiceConfirm(rec, intent.task == TaskKind::Attack, std::string());
+                    voiced = true;
+                }
             }
             break;
         }
@@ -1822,9 +1868,28 @@ void Refresh(Referee& r, float now)
     s.winner = r.winner;
     s.winReason = r.winReason;
     s.queuedPurchases = 0;
-    for (const QueuedBuy& q : r.buyQueue)
-        if (q.side == r.playerSide)
-            s.queuedPurchases++;
+    s.builds.clear();
+    for (size_t i = 0; i < r.builds.size(); i++)
+    {
+        const Build& b = r.builds[i];
+        if (b.side != r.playerSide)
+            continue;
+        s.queuedPurchases++;
+        BuildInfo info;
+        info.base = b.base;
+        info.type = b.type;
+        info.structure = b.structure;
+        info.active = BuildActive(r, i);
+        info.progress = BuildCost(r, b) > 0.0f ? std::min(1.0f, b.paid / BuildCost(r, b)) : 1.0f;
+        info.paused = b.paused;
+        info.placing = b.placing;
+        info.why = b.why;
+        s.builds.push_back(info);
+    }
+    s.structures.clear();
+    for (const Structure& st : r.structures)
+        if (const EntityAI* o = st.object; o && !o->IsDammageDestroyed())
+            s.structures.push_back({st.base, st.kind, o->Position().X(), o->Position().Z()});
     s.groups.clear();
     for (const GroupRecord& rec : r.groups)
     {
@@ -2485,35 +2550,11 @@ void StartSides(Referee& r)
                             : "west setFriend [resistance, 0]; resistance setFriend [west, 0]; "
                               "east setFriend [resistance, 0]; resistance setFriend [east, 0]");
     r.warStart = Now();
+    StartWeather(r, r.warStart);
     if (r.options.resistanceAlly && r.war.sideCount > 2)
         WarLog("the Resistance fights with WEST");
     if (r.options.timeLimit > 0)
         WarLog("time limit: " + std::to_string(r.options.timeLimit) + " minutes");
-}
-
-// The player's purchases waiting for supplies or a quiet base.
-void StepBuyQueue(Referee& r, float now)
-{
-    for (size_t i = 0; i < r.buyQueue.size();)
-    {
-        const QueuedBuy q = r.buyQueue[i];
-        std::string why;
-        if (now > q.until || r.war.states[q.base].owner != q.side)
-        {
-            r.buyQueue.erase(r.buyQueue.begin() + static_cast<std::ptrdiff_t>(i));
-            Radio(r, q.side, "The " + r.config.squads[q.type].name + " for " + r.war.defs[q.base].name +
-                                 " is cancelled: it could not deploy.");
-            continue;
-        }
-        if (CanBuyFor(r, q.side, q.base, q.type, &why))
-        {
-            r.buyQueue.erase(r.buyQueue.begin() + static_cast<std::ptrdiff_t>(i));
-            if (const int id = BuyFor(r, q.side, q.base, q.type, nullptr, false))
-                Radio(r, q.side, Callsign(id) + ", " + r.config.squads[q.type].name + ", ready at " + r.war.defs[q.base].name + ".");
-            continue;
-        }
-        i++;
-    }
 }
 
 // One line per finished war in the profile's conquest-history.txt.
@@ -2545,6 +2586,7 @@ void Tick(Referee& r, float dt, float now)
         ParkBody(r);
         r.playerSide = InMultiplayer() ? LocalSide(r) : r.options.side;
         PlacePosts(r);
+        BuildHqStructures(r); // before the squads park round them
         for (int s = 0; s < r.war.sideCount; s++)
             for (size_t o = 0; o < r.war.defs.size(); o++)
                 if (r.war.states[o].owner == s && r.war.defs[o].kind == ObjectiveKind::HQ)
@@ -2576,6 +2618,9 @@ void Tick(Referee& r, float dt, float now)
     std::vector<Presence> presence;
     Measure(r, presence);
     StepSupply(r, dt, now);
+    if (!r.ended)
+        StepBuilds(r, dt, now);
+    StepWeather(r, now);
     TrackUnits(r, now);
     for (size_t o = 0; o < r.war.defs.size(); o++)
     {
@@ -2633,8 +2678,6 @@ void Tick(Referee& r, float dt, float now)
         RecordHistory(r, now);
         Status(r);
     }
-    if (!r.ended)
-        StepBuyQueue(r, now);
     TrackGroups(r, now);
     if (!r.ended)
         LlmStep(r, now);
@@ -2786,6 +2829,7 @@ LSError SerializeSaved(ParamArchive& ar, Saved& w)
         PARAM_CHECK(ar.Serialize("resistanceAlly", w.options.resistanceAlly, 1, false))
         PARAM_CHECK(ar.Serialize("enemyMarkers", w.options.enemyMarkers, 1, false))
         PARAM_CHECK(ar.Serialize("aiSkill", w.options.aiSkill, 1, 1))
+        PARAM_CHECK(ar.Serialize("weather", w.options.weather, 1, 0))
         PARAM_CHECK(ar.Serialize("warStart", w.warStart, 1, -1.0f))
         PARAM_CHECK(ar.Serialize("winner", w.winner, 1, NoSide))
         PARAM_CHECK(SerializeText(ar, "winReason", w.winReason))
@@ -2903,6 +2947,7 @@ LSError SerializeSaved(ParamArchive& ar, Saved& w)
     }
 
     count = static_cast<int>(w.log.size());
+    PARAM_CHECK(SerializeBuilds(ar, w.builds, w.structures))
     PARAM_CHECK(ar.Serialize("logLines", count, 1, 0))
     w.log.resize(static_cast<size_t>(std::max(count, 0)));
     for (size_t i = 0; i < w.log.size(); i++)
@@ -2936,6 +2981,8 @@ void Restore(Referee& r, const Saved& w)
     r.bought = w.bought;
     r.groups = w.groups;
     r.units = w.units;
+    r.builds = w.builds;
+    r.structures = w.structures;
     r.nextGroupId = w.nextGroupId;
     r.playerSide = w.playerSide;
     r.commanderBody = w.commanderBody;
@@ -3008,6 +3055,8 @@ LSError Serialize(ParamArchive& ar)
         w.bought = r.bought;
         w.groups = r.groups;
         w.units = r.units;
+        w.builds = r.builds;
+        w.structures = r.structures;
         w.nextGroupId = r.nextGroupId;
         w.playerSide = r.playerSide;
         w.commanderBody = r.commanderBody;
@@ -3234,6 +3283,12 @@ bool CanBuyFor(const Referee& r, int side, int base, int type, std::string* reas
         return refuse("tanks and aircraft deploy at the HQ (or an airfield)");
     if (def.role == "supply" && r.war.defs[base].kind != ObjectiveKind::HQ)
         return refuse("supply trucks are loaded at the HQ: deploy them there");
+    if (const std::string missing = MissingFor(r, base, type); !missing.empty())
+    {
+        if (reason)
+            *reason = "needs " + missing + " here";
+        return false;
+    }
     if (BudgetAt(r, side, base) < def.cost)
         return refuse(r.war.defs[base].kind == ObjectiveKind::HQ ? "not enough supplies"
                                                                   : "not enough supplies at this base: bring a supply truck");
@@ -3242,45 +3297,15 @@ bool CanBuyFor(const Referee& r, int side, int base, int type, std::string* reas
     return true;
 }
 
+// The commander's order for a squad: into the base's production queue (ConquestRefereeBuild.inc). 0, with
+// `reason` "queued" or why not: the squad deploys when its clock is full.
 int BuyFor(Referee& r, int side, int base, int type, std::string* reason, bool queue)
 {
-    if (!CanBuyFor(r, side, base, type, reason))
-    {
-        // Short of supplies, or the base is not quiet: the order waits, and is made when it can be.
-        if (!queue || IsMirror() || type < 0 || type >= static_cast<int>(r.config.squads.size()) || base < 0 ||
-            base >= static_cast<int>(r.war.defs.size()) || r.war.states[base].owner != side)
-            return 0;
-        int waiting = 0;
-        for (const QueuedBuy& q : r.buyQueue)
-            if (q.side == side)
-                waiting++;
-        if (waiting >= static_cast<int>(QueueMax))
-            return 0;
-        r.buyQueue.push_back({side, base, type, Now() + QueueSeconds});
-        WarLog("commander: " + Name(side) + " queued a " + r.config.squads[type].name + " at " + r.war.defs[base].name +
-               (reason ? " (" + *reason + ")" : std::string()));
-        if (reason)
-            *reason = "queued: " + *reason + "; it deploys when it can (2 min)";
-        return 0;
-    }
-    const int id = SpawnSquad(r, side, base, false, type);
-    if (!id)
-    {
-        if (reason)
-            *reason = "the squad could not be created";
-        return 0;
-    }
-    // A squad the commander bought waits where it deployed for his orders, like a factory's output --
-    // for two minutes; then, still without an order, the AI puts it to work (no squad idles).
-    for (GroupRecord& rec : r.groups)
-        if (rec.id == id)
-        {
-            rec.task = TaskKind::None;
-            rec.objective = -1;
-            rec.lockedUntil = Now() + BoughtWaitSeconds;
-        }
-    WarLog("commander: " + Name(side) + " bought a " + r.config.squads[type].name + " at " + r.war.defs[base].name);
-    return id;
+    (void)queue;
+    const std::string why = IsMirror() ? std::string("ask the server") : QueueBuild(r, side, base, type, false, true);
+    if (reason)
+        *reason = why.empty() ? std::string("queued") : why;
+    return 0;
 }
 
 bool BarrageFor(Referee& r, int side, float x, float y, std::string* reason)
@@ -3381,11 +3406,9 @@ void HandleRequest(Referee& r, const GameValue& value)
             ids.push_back(static_cast<int>(Num(list, i)));
         OrderGroupsFor(r, side, ids, Num(args, 1), Num(args, 2), who);
     }
-    else if (kind == "buy" && args.Size() >= 2)
+    else if (BuildRequest(r, side, kind, args))
     {
-        const int id = BuyFor(r, side, static_cast<int>(Num(args, 0, -1)), static_cast<int>(Num(args, 1, -1)), nullptr);
-        if (id)
-            Radio(r, side, "Commander, " + Callsign(id) + " is ready at " + r.war.defs[static_cast<int>(Num(args, 0))].name + ".");
+        // build, cancel, place (ConquestRefereeNet.inc)
     }
     else if (kind == "barrage" && args.Size() >= 2)
         BarrageFor(r, side, Num(args, 0), Num(args, 1), nullptr);
@@ -3848,6 +3871,7 @@ BarrageInfo Barrage()
         b.cooldownLeft = IsMirror() ? r.netCooldown[r.playerSide]
                                     : std::max({0.0f, r.lastBarrage[r.playerSide] + r.config.barrageCooldown - Now(),
                                                 SupportWait(r, Now())});
+    b.cooldown = b.cooldownLeft > r.config.barrageCooldown ? r.config.supportDelay : r.config.barrageCooldown;
     return b;
 }
 
@@ -3863,6 +3887,7 @@ AirStrikeInfo AirStrike()
         a.cooldownLeft = IsMirror() ? r.netAirCooldown[r.playerSide]
                                     : std::max({0.0f, r.lastAir[r.playerSide] + r.config.airCooldown - Now(),
                                                 SupportWait(r, Now())});
+        a.cooldown = a.cooldownLeft > r.config.airCooldown ? r.config.supportDelay : r.config.airCooldown;
         a.inbound = IsMirror() ? r.netAirInbound[r.playerSide]
                                : std::any_of(r.strikes.begin(), r.strikes.end(), [&](const Strike& s) { return s.side == r.playerSide; });
     }
@@ -4661,6 +4686,7 @@ std::string StatusText()
     out += buf;
     return out;
 }
+#include "ConquestRefereeBuildApi.inc"
 } // namespace Poseidon::Conquest
 
 // conquestStats: [started, ended, sides, squads, [soldiers alive per side], [objectives held per side]] -- the
@@ -4799,6 +4825,8 @@ static GameValue ConquestStartUnary(const GameState*, GameValuePar oper1)
         options.resistanceAlly = static_cast<bool>(a[9]);
     if (a.Size() > 10 && a[10].GetType() == GameScalar)
         Poseidon::Conquest::SetSupportDelay(static_cast<float>(a[10]));
+    if (a.Size() > 11 && a[11].GetType() == GameScalar) // [..., weather (0-6)]
+        options.weather = std::clamp(static_cast<int>(static_cast<float>(a[11])), 0, 6);
     return GameValue(Poseidon::Conquest::BeginWar(options));
 }
 

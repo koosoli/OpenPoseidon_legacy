@@ -927,3 +927,37 @@ Later the same night (the owner asleep, soaks only):
   the same one straight back). Kolgujev, 60 minutes: back-offs 57 -> 43, stalls 24 -> 12.
 - Islands: soaks on all four (Everon, Malden, Kolgujev, Nogova) run without engine errors; both sides'
   helicopters come home and are stood down on each.
+
+### Status 2026-10-27: production, structures, weather, finished orders, multiplayer settings
+
+The owner's requests of the morning, built while the owner was away (verified by the feature test, section G,
+and soaks; the owner's own playtest still to come):
+
+- **Production, Command & Conquer's way** (`ConquestRefereeBuild.inc`): a squad is built, not bought. A click
+  queues it at the base (up to five); only the first in a base's queue is worked on, its tile shows a clock
+  that fills as it is paid, a little at a time. Short of supplies (or men) the clock pauses and goes on by
+  itself; ready, the squad deploys when the base is quiet and waits for the commander's orders. A right click
+  cancels the last queued one, and what it had paid comes back. Build time scales with the price (a rifle
+  squad 19 s, a tank 78 s). The AI uses the same queues, one order a base at a time (this replaces the 30 s
+  purchase spacing). Mortars and the air strike show their reload (or the war's first five minutes) as a clock.
+- **Structures**: a barracks tent (Camp, 300, 45 s) for soldiers, a motor pool (Shed, 500, 60 s) for vehicles,
+  a helipad (HeliH, 400, 50 s) for aircraft. A squad needs them at the base it is built at (motorised and
+  mechanised: barracks and motor pool; air assault: barracks and helipad). Every HQ starts with all three;
+  any other base builds its own. Built, a structure waits for the commander's click inside the base (dry,
+  level, clear; the view rings where it may stand). The AI places its own, and builds a barracks at a front
+  base once that base has the supplies. Structures serve whoever holds the base.
+- **Supplies and supply lines on the map**: under each of the side's bases, its supplies (green, amber, red)
+  and what stands there; each supply truck on its way is a dashed line to its base with its load. The base
+  card lists the structures, what is in production and the trucks bound for it.
+- **Weather** (setup): the mission's, clear, cloudy, overcast, rain, fog, or changing -- one step at a time to
+  a neighbouring weather, blended over 20 game minutes and held 25-40 (`ConquestRefereeWeather.inc`).
+- **Finished orders get new ones**: a squad whose town is taken (or lost, or off the front) gets a new task
+  even while a human commands -- the AI left every squad with a task alone, so squads stood in towns their
+  side had long taken. The commander's own orders are released then too, and the leader says where next.
+- **A squad clicked**: the camera goes to its leader (Tab and the soldier buttons reach the others).
+- **Five tanks** a side at the start.
+- **Multiplayer settings**: the game's own lobby is Conquest's lobby. The host picks the war's settings there
+  as the mission's parameters: supplies each side starts with (1000-5000) and a time limit. Production
+  queues and structures are published to the clients; their clicks are requests to the server.
+
+Not verified here: a real multiplayer session (the lobby parameters, a client's production and placement).

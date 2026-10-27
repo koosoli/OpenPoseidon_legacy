@@ -17,7 +17,8 @@
 #>
 param(
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
-    [string]$Bin = ''
+    [string]$Bin = '',
+    [string]$Only = '' # run only the sections whose name starts with this (A, B, ... G)
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
@@ -26,6 +27,7 @@ if (!$env:LOCK_OWNER) {
     $argv = @((Join-Path $PSScriptRoot 'with-game-lock.sh'), $shellExe.Replace('\', '/'), '-NoProfile', '-File', $PSCommandPath,
         '-GameDir', $GameDir)
     if ($Bin) { $argv += @('-Bin', $Bin) }
+    if ($Only) { $argv += @('-Only', $Only) }
     $env:LOCK_OWNER = 'conquest feature test'
     try { & 'C:\Program Files\Git\bin\bash.exe' @argv; exit $LASTEXITCODE }
     finally { Remove-Item Env:LOCK_OWNER }
@@ -42,6 +44,7 @@ function Check($ok, $what) {
 }
 
 function Invoke-Run($name, [scriptblock]$body, [string]$runMission = $mission) {
+    if ($Only -and !$name.StartsWith($Only)) { return }
     $out = Join-Path $base $name
     New-Item -ItemType Directory -Force $out | Out-Null
     $env:POSEIDON_USER_DIR = Join-Path $out 'user'
@@ -155,16 +158,16 @@ Invoke-Run 'B-commander' {
     Start-Sleep -Seconds 4
     Shot 'barrage-2'
     Check ((Eval 'conquestBarrage [4700, 10450]') -match 'reloading') 'B: the mortars reload after a barrage'
-    # Follow an EAST squad leader (each side starts with seven squads: WEST 1-7, EAST 8-14), then all the way down.
-    Check ((Eval 'conquestCamera [8, 25, 30]') -eq 'true') 'B: following squad 8'
+    # Follow an EAST squad leader (each side starts with ten squads: WEST 1-10, EAST 11-20), then all the way down.
+    Check ((Eval 'conquestCamera [11, 25, 30]') -eq 'true') 'B: following squad 11'
     Start-Sleep -Seconds 3
     Shot 'follow-25m'
-    $null = Eval 'conquestCamera [8, 3, 3]'
+    $null = Eval 'conquestCamera [11, 3, 3]'
     Start-Sleep -Seconds 3
     Shot 'follow-ground-level'
     # Into a soldier, killed: back in command.
-    $took = Eval 'conquestTakeControl 8'
-    Check ($took -eq 'true') "B: took control of squad 8 ($took)"
+    $took = Eval 'conquestTakeControl 11'
+    Check ($took -eq 'true') "B: took control of squad 11 ($took)"
     Start-Sleep -Seconds 3
     $null = Eval 'player setDammage 1'
     Start-Sleep -Seconds 5
@@ -184,7 +187,7 @@ Invoke-Run 'B-commander' {
     $moved = [Math]::Sqrt(($c2[0] - $c1[0]) * ($c2[0] - $c1[0]) + ($c2[1] - $c1[1]) * ($c2[1] - $c1[1]))
     Check ($moved -gt 0 -and $moved -le $c1[2] / 3 + 1 -and $c2[2] -lt $c1[2]) "B: zooming in moves toward the pointer, at most a third of the distance ($moved m)"
     # Any soldier, not just the leader: Tab steps to the next man of the selected squad, T takes control of him.
-    Check ((Eval 'conquestCamera [9, 25, 30]') -eq 'true') 'B: following squad 9'
+    Check ((Eval 'conquestCamera [12, 25, 30]') -eq 'true') 'B: following squad 12'
     $null = Send @{cmd = 'key'; sc = 43 }
     Start-Sleep -Seconds 1
     Check ((Eval 'conqTestU = conquestCameraState select 3; format ["%1", !(isNull conqTestU) && conqTestU != leader group conqTestU]') -eq 'true') 'B: Tab focuses a soldier who is not the leader'
@@ -195,7 +198,7 @@ Invoke-Run 'B-commander' {
     Start-Sleep -Seconds 5
     Check ((LogCount 'the soldier you controlled was killed; back in command') -ge 2) 'B: back in command'
     # A command answered on the radio, in the squad leader's voice.
-    Check ((Eval 'conquestSquad [[10], "holdfire"]') -eq '1') 'B: squad 10 told to hold fire'
+    Check ((Eval 'conquestSquad [[13], "holdfire"]') -eq '1') 'B: squad 13 told to hold fire'
     Start-Sleep -Seconds 4
     Check ((LogCount 'for speaker radio') -ge 1) 'B: the squad leader answered on the radio'
     Check ((Eval 'conquestState') -notmatch 'inactive') 'B: the war still runs'
@@ -240,15 +243,15 @@ Invoke-Run 'C-barrage' {
         Start-Sleep -Milliseconds 700
         Shot "bombs-$t"
     }
-    # The command bar's orders. EAST's squads: 8 motorised, 9 rifle, 10 recon, 11 and 12 tanks, 13 air assault, 14 supply truck.
-    Check ((Eval 'conquestSquad [[8, 9], "engage"]') -eq '2') 'C: two squads told to engage'
-    Check ((Eval 'conquestSquad [[9], "stop"]') -eq '1') 'C: a squad told to stop'
-    Check ((Eval 'conquestSquad [[8], "board"]') -eq '1') 'C: a squad told to board its truck'
+    # The command bar's orders. EAST's squads: 11 motorised, 12 rifle, 13 recon, 14-18 tanks, 19 air assault, 20 supply truck.
+    Check ((Eval 'conquestSquad [[11, 12], "engage"]') -eq '2') 'C: two squads told to engage'
+    Check ((Eval 'conquestSquad [[12], "stop"]') -eq '1') 'C: a squad told to stop'
+    Check ((Eval 'conquestSquad [[11], "board"]') -eq '1') 'C: a squad told to board its truck'
     # Engage with a target: the tanks (11) on a building in Tyrone.
-    $what = Eval 'conquestEngage [[11], 4946, 9056]'
+    $what = Eval 'conquestEngage [[14], 4946, 9056]'
     Check ($what -ne '') "C: the tanks engage a building in Tyrone ($what)"
     # The helicopter squad to Tyrone (1.9 km): it must land to unload, not hover over the drop.
-    Check ((Eval 'conquestOrder [[13], 4946, 9056]') -eq '1') 'C: the air assault squad sent to Tyrone'
+    Check ((Eval 'conquestOrder [[19], 4946, 9056]') -eq '1') 'C: the air assault squad sent to Tyrone'
     Fast
     $deadline = [DateTime]::UtcNow.AddSeconds(45)
     $landed = $false
@@ -271,6 +274,61 @@ Invoke-Run 'F-support-delay' {
     Check ((Eval 'conquestAirStrike [4700, 10450]') -match 'support is ready') 'F: no air strike at the start'
 }
 
+Invoke-Run 'G-production' {
+    # Production, Command & Conquer's way: EAST in command, 1500 supplies, rain. The Airfield (objective 17) is
+    # EAST's HQ; squad types: 0 rifle, 6 tank; structures: 0 barracks tent, 1 motor pool, 2 helipad.
+    Check ((Eval 'conquestStart ["EAST", "commander", "contacts", "", [], false, 0, [500, 1500], 0, false, 0, 4]') -eq 'true') 'G: the war starts in rain'
+    Start-Sleep -Seconds 6
+    Check ((LogCount 'weather: rain') -ge 1) 'G: the weather is the one chosen'
+    Check ((Eval 'format ["%1", rain > 0.3 && overcast > 0.7]') -eq 'true') "G: it rains ($(Eval 'format [""%1 %2"", rain, overcast]'))"
+    Check ((Eval '{_x select 0 == 17} count conquestStructures') -eq '3') 'G: the HQ starts with its barracks, motor pool and helipad'
+    # A rifle squad: its clock runs, paid as it goes, and it deploys when full.
+    Check ((Eval 'conquestQueue [17, 0, false]') -eq '') 'G: a rifle squad queued at the HQ'
+    Start-Sleep -Seconds 3
+    $p1 = [double](Eval 'format ["%1", ((conquestBuilds select 0) select 3)]')
+    Check ($p1 -gt 0 -and $p1 -lt 1) "G: its clock runs ($p1)"
+    Fast
+    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+    while ((LogCount 'Rifle squad ready at Airfield') -lt 1 -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 500 }
+    Normal
+    Check ((LogCount 'Rifle squad ready at Airfield') -ge 1) 'G: the rifle squad deploys when its clock is full'
+    # No barracks, no soldiers: the HQ's tent destroyed, a rifle squad is refused; a new tent is built and put up.
+    $null = Eval '{_x setDammage 1} forEach ([4772, 10923] nearObjects ["Camp", 400])'
+    Start-Sleep -Seconds 2
+    Check ((Eval 'conquestQueue [17, 0, false]') -match 'needs a Barracks tent') 'G: without a barracks no soldiers'
+    Check ((Eval 'conquestQueue [17, 0, true]') -eq '') 'G: a barracks tent under construction'
+    Fast
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    while ((Eval 'format ["%1", {_x select 5} count conquestBuilds]') -eq '0' -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Seconds 1 }
+    Normal
+    Check ((Eval 'format ["%1", {_x select 5} count conquestBuilds]') -eq '1') 'G: built, it waits for the commander to place it'
+    Check ((Eval 'conquestPlace [17, 0, 3000, 3000]') -match 'outside') 'G: not outside the base'
+    $placed = Eval 'conquestPlace [17, 0, 4700, 10870]'
+    if ($placed -ne '') { $placed = Eval 'conquestPlace [17, 0, 4830, 10990]' }
+    Check ($placed -eq '') "G: the barracks stands where the commander clicked ($placed)"
+    Check ((Eval 'conquestQueue [17, 0, false]') -eq '') 'G: and the HQ builds soldiers again'
+    Start-Sleep -Seconds 2
+    Check ((Eval 'conquestCancel [17, 0, false]') -eq 'true') 'G: a queued squad cancelled, its supplies back'
+    # Three tanks on what is left (about 1000): the second waits, paused, for supplies.
+    foreach ($k in 1..3) { $null = Eval 'conquestQueue [17, 6, false]' }
+    Start-Sleep -Seconds 2 # conquestBuilds reads the snapshot, refreshed each second
+    Check ((Eval 'count conquestBuilds') -eq '3') 'G: three tanks in the queue'
+    Fast
+    $deadline = [DateTime]::UtcNow.AddSeconds(45)
+    while ((Eval 'format ["%1", {_x select 4} count conquestBuilds]') -eq '0' -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Seconds 1 }
+    Normal
+    $null = Send @{cmd = 'key'; sc = 5 } # B: the deploy panel, its tiles and clocks
+    Start-Sleep -Seconds 1
+    Shot 'production-paused'
+    $null = Send @{cmd = 'key'; sc = 5 }
+    Check ((Eval 'format ["%1", {_x select 4} count conquestBuilds]') -ne '0') 'G: short of supplies, the clock pauses'
+    # The HQ's motor pool and helipad, close.
+    $m = [regex]::Matches((Eval 'format ["%1", conquestStructures select 1]'), '-?\d+(\.\d+)?') | ForEach-Object { [double]$_.Value }
+    $null = Eval "conquestCamera [$($m[2]), $($m[3]), 70, 35, 150]"
+    Start-Sleep -Seconds 2
+    Shot 'production-structures'
+}
+
 Invoke-Run 'D-resistance' {
     # Three sides, three villages to win, uneven supplies: [side, start, fog, view, llm, resistance, villages, supplies]
     Check ((Eval 'conquestStart ["GUER", "soldier", "contacts", "", [], true, 3, [900, 400, 650]]') -eq 'true') 'D: the war starts with the Resistance'
@@ -278,7 +336,7 @@ Invoke-Run 'D-resistance' {
     $state = Eval 'conquestState'
     Check ($state -match 'GUER') "D: the Resistance takes part"
     Check ((LogCount 'stays out of this war') -eq 0) 'D: nobody was left out'
-    Check ((LogCount 'GUER bought|GUER group') -ge 1) 'D: the Resistance commander acts'
+    Check ((LogCount 'GUER bought|GUER builds|GUER group') -ge 1) 'D: the Resistance commander acts'
     Shot 'resistance-soldier'
 }
 
