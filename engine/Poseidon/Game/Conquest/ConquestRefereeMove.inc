@@ -37,6 +37,33 @@ bool InGroundVehicle(AIGroup* grp)
     return false;
 }
 
+// Someone of the squad is on his way into its vehicle (ordered in, assigned one, still on foot): boarding
+// takes a while, and a squad doing it is busy, not stuck. Ordering it again restarted the boarding (Kolgujev:
+// the tanks and the helicopter at EAST's HQ were "stuck" from the first minute, never having got in).
+bool Boarding(AIGroup* grp)
+{
+    for (int id = 1; id <= MAX_UNITS_PER_GROUP; id++)
+        if (AIUnit* unit = grp->UnitWithID(id); unit && unit->GetLifeState() == AIUnit::LSAlive && unit->IsFreeSoldier() &&
+                                               unit->VehicleAssigned() && unit->IsGetInOrdered() &&
+                                               unit->VehicleAssigned()->IsAbleToMove())
+            return true;
+    return false;
+}
+
+// Boarding counts as progress for 3 minutes from when it began (re-orders do not restart that clock): a
+// squad that cannot get in at all is stuck after all.
+bool BoardingGrace(GroupRecord& rec, float now)
+{
+    if (!Boarding(rec.group))
+    {
+        rec.boardingSince = -1.0f;
+        return false;
+    }
+    if (rec.boardingSince < 0.0f)
+        rec.boardingSince = now;
+    return now - rec.boardingSince < 180.0f;
+}
+
 // A vehicle that has not moved on backs off: 30-75 m back and to one side of the way it was going, the
 // side alternating. Ordering the same point again plans the same blocked path from the same spot; from
 // somewhere else the driver's pathfinding gets a new start. The task's destination stays, and TrackGroups

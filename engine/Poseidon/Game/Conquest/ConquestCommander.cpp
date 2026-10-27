@@ -160,6 +160,8 @@ std::vector<Intent> PlanStandard(const SideView& view, const CommanderTuning& tu
                 continue;
             if (defend ? slot.group->airborne : depleted(*slot.group))
                 continue; // worn-out squads only defend; helicopters never do
+            if (slot.group->avoid == objective)
+                continue; // it stalled on the way there lately
             const float d = Distance(slot.group->x, slot.group->y, war.defs[objective].x, war.defs[objective].y);
             if (d < bestDist)
             {
@@ -263,6 +265,8 @@ std::vector<Intent> PlanStandard(const SideView& view, const CommanderTuning& tu
             for (size_t t = 0; t < spread; t++)
             {
                 const int o = targets[t].first;
+                if (o == slot.group->avoid && spread > 1)
+                    continue; // it stalled on the way there lately: another target
                 const float share = force[o] / attackNeed(o);
                 if (share < bestShare)
                 {

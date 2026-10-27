@@ -505,3 +505,43 @@ TEST_CASE("conquest commander: spare squads spread over the front instead of one
             targets.insert(i.objective);
     CHECK(targets.size() == 3);
 }
+
+TEST_CASE("conquest commander: a squad that stalled on the way is sent to another target first", "[conquest]")
+{
+    // The star again: three neutral towns round side 0's centre.
+    War war;
+    war.sideCount = 2;
+    const float pos[5][2] = {{0, 0}, {0, 1000}, {1000, 1000}, {0, 2000}, {-1000, 1000}};
+    for (int i = 0; i < 5; i++)
+    {
+        ObjectiveDef d;
+        d.name = "O" + std::to_string(i);
+        d.x = pos[i][0];
+        d.y = pos[i][1];
+        d.kind = i == 0 ? ObjectiveKind::HQ : ObjectiveKind::Town;
+        war.defs.push_back(d);
+    }
+    war.defs[0].neighbours = {1};
+    war.defs[1].neighbours = {0, 2, 3, 4};
+    war.defs[2].neighbours = {1};
+    war.defs[3].neighbours = {1};
+    war.defs[4].neighbours = {1};
+    war.defs[0].initialOwner = 0;
+    war.defs[1].initialOwner = 0;
+    StartWar(war, Tuning(), 0.0f);
+    SideView v = ViewOf(war, 0);
+    v.groups.push_back({1, 0.0f, 1000.0f, 8, TaskKind::None, -1, false});
+    const auto target = [&]()
+    {
+        for (const Intent& i : PlanStandard(v, CommanderTuning()))
+            if (i.kind == Intent::Kind::Assign && i.group == 1)
+                return i.objective;
+        return -1;
+    };
+    const int first = target();
+    REQUIRE(first >= 2);
+    v.groups[0].avoid = first; // it stalled on the way there
+    const int second = target();
+    CHECK(second >= 2);
+    CHECK(second != first);
+}

@@ -94,6 +94,9 @@ struct GroupRecord
     bool detouring = false;      // backing off from where its vehicle got stuck ...
     float detourUntil = 0.0f;    // ... until then; no other order meanwhile
     int tries = 0;               // attempts to get it unstuck since it last made progress
+    int avoid = -1;              // the objective it stalled on ...
+    float avoidUntil = 0.0f;     // ... which the planner gives it again only after this
+    float boardingSince = -1.0f; // when its men started for its vehicles (-1: nobody is boarding)
     int supplyState = 0;         // a supply squad: 0 at the HQ, 1 loaded and on the way, 2 coming back
     int supplyTarget = -1;       // ... the base it brings supplies to
     float supplyLoad = 0.0f;     // ... and what it carries
@@ -1403,7 +1406,8 @@ void TrackGroups(Referee& r, float now)
         {
             const float toDest = std::hypot(grp->Leader()->Position().X() - rec.destination.X(),
                                             grp->Leader()->Position().Z() - rec.destination.Z());
-            if (toDest < rec.bestDistance - 25.0f || InContact(r, rec.side, grp->Leader()->Position()))
+            if (toDest < rec.bestDistance - 25.0f || InContact(r, rec.side, grp->Leader()->Position()) ||
+                BoardingGrace(rec, now))
             {
                 rec.bestDistance = std::min(rec.bestDistance, toDest);
                 rec.bestAt = now;
@@ -1449,7 +1453,8 @@ void TrackGroups(Referee& r, float now)
             const float dist = Dist(grp->Leader()->Position(), d);
             // A squad trading fire on the way is busy, not stuck: soaks showed squads "stalled"
             // in front of a held town, re-tasked, and sent straight back into the same fight.
-            if (dist < rec.bestDistance - 25.0f || InContact(r, rec.side, grp->Leader()->Position()))
+            if (dist < rec.bestDistance - 25.0f || InContact(r, rec.side, grp->Leader()->Position()) ||
+                BoardingGrace(rec, now))
             {
                 rec.bestDistance = std::min(rec.bestDistance, dist);
                 rec.bestAt = now;
@@ -1503,13 +1508,17 @@ void TrackGroups(Referee& r, float now)
                     MoveGroup(rec, rec.destination);
                     rec.orderedAt = now;
                     rec.tries++;
-                    WarLog(Name(rec.side) + " group " + std::to_string(rec.id) + " stuck on the way to " + d.name +
+                    const Vector3 at = grp->Leader()->Position();
+                    WarLog(Name(rec.side) + " group " + std::to_string(rec.id) + " stuck on the way to " + d.name + " at " +
+                           std::to_string(static_cast<int>(at.X())) + " " + std::to_string(static_cast<int>(at.Z())) +
                            ": ordered again by another way");
                 }
             }
             if (rec.task == TaskKind::Attack && dist > d.radius && now - rec.bestAt > StallSeconds && !rec.stalled)
             {
                 rec.stalled = true;
+                rec.avoid = rec.objective;
+                rec.avoidUntil = now + 300.0f;
                 r.replan[rec.side] = true;
                 WarLog(Name(rec.side) + " group " + std::to_string(rec.id) + " stalled on the way to " + d.name);
             }
@@ -1577,6 +1586,7 @@ SideView BuildView(Referee& r, int side, float now)
         g.objective = rec.objective;
         g.stalled = rec.stalled;
         g.locked = now < rec.lockedUntil || grp->IsAnyPlayerGroup();
+        g.avoid = now < rec.avoidUntil ? rec.avoid : -1;
         if (rec.type >= 0 && rec.type < static_cast<int>(r.config.squads.size()))
         {
             const SquadDef& def = r.config.squads[rec.type];

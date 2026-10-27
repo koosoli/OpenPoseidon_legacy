@@ -920,3 +920,10 @@ Later the same night (the owner asleep, soaks only):
 - **Helicopters stood down** once still for 5 s under 8 m near home (a Mi-17's origin stands 4.4 m up).
 - Balance, open: EAST has won the last six AI-only soaks on Everon (it holds more towns near its Airfield).
   The setup screen's uneven supplies can even it; no tuning yet.
+- **Boarding is not being stuck**: a squad walking to its vehicles made no progress toward its target, so after
+  90 s it was "stuck" and ordered again -- which restarted the boarding (Kolgujev's EAST tanks and helicopter,
+  from the first minute). Boarding now counts as busy for 3 minutes from when it began.
+- **A stalled squad goes elsewhere first**: it avoids the objective it stalled on for 5 minutes (it was handed
+  the same one straight back). Kolgujev, 60 minutes: back-offs 57 -> 43, stalls 24 -> 12.
+- Islands: soaks on all four (Everon, Malden, Kolgujev, Nogova) run without engine errors; both sides'
+  helicopters come home and are stood down on each.

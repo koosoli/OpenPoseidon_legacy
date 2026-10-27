@@ -39,6 +39,7 @@ struct GroupView
     bool crew = false;     // a tank's or gunship's crew: a full vehicle in a few men, never "worn out"
     bool airborne = false; // a helicopter squad still in the air (a gunship, or air assault not yet set down):
                            // it attacks or carries, never holds a place (owner, 2026-10-26)
+    int avoid = -1;        // the objective it stalled on lately: sent elsewhere first (-1: none)
 };
 
 struct SideView
