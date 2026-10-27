@@ -2667,7 +2667,7 @@ impl Sky {
             rain: 0.0,
             rain_now: 0.0,
             cloud_base_shade: 1.0,
-            overcast_gloom: 0.0,
+            overcast_gloom: 1.0,
             cirrus_soft_now: soft_env.unwrap_or(CIRRUS_SOFT_DEFAULT),
             earth_frame: [0.0; 4],
             earth_geometry: [[0.0; 4]; 4],

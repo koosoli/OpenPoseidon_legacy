@@ -84,8 +84,7 @@ pub(crate) fn shader_defs() -> std::collections::HashMap<String, naga_oil::compo
     }
     // look pack (2026-10-25), off by default until the owner picks it from A/B captures: TW_FOAM2
     // two-stage whitecaps (water_tw::foam2_enabled switches the FFT side with the same variable)
-    // FOG_DITHER (2026-10-26): half a slice of jitter on the layered fog lookup, for A/B
-    for (var, def) in [("WGR_TW_FOAM2", "TW_FOAM2"), ("WGR_FOG_DITHER", "FOG_DITHER")] {
+    for (var, def) in [("WGR_TW_FOAM2", "TW_FOAM2")] {
         if std::env::var(var).as_deref() == Ok("1") {
             defs.insert(def.to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
         }
@@ -95,8 +94,9 @@ pub(crate) fn shader_defs() -> std::collections::HashMap<String, naga_oil::compo
     // sun's glitter on the sea (switched off at run time by the Water tab's "TW sun glitter")
     // SEA_HYDRO short waves bunched on crests and downwind faces, SEA_SMEAR froth trailing downwind
     // (both 2026-10-26; the Water tab's switches turn each off at run time), CLOUD_SHADE darker bases
-    // on broken cloud (2026-10-26; the Sky tab's "Dark bases" scales it at run time)
-    for (var, def) in [("WGR_CLOUD_DECK", "CLOUD_DECK"), ("WGR_SEA_SPECAA", "SEA_SPECAA"), ("WGR_SEA_GLINTS", "SEA_GLINTS"), ("WGR_SEA_HYDRO", "SEA_HYDRO"), ("WGR_SEA_SMEAR", "SEA_SMEAR"), ("WGR_CLOUD_SHADE", "CLOUD_SHADE")] {
+    // on broken cloud (2026-10-26; the Sky tab's "Dark bases" scales it at run time), FOG_DITHER half a
+    // slice of jitter on the layered fog lookup (2026-10-27, owner: "i still have the fog lines")
+    for (var, def) in [("WGR_CLOUD_DECK", "CLOUD_DECK"), ("WGR_SEA_SPECAA", "SEA_SPECAA"), ("WGR_SEA_GLINTS", "SEA_GLINTS"), ("WGR_SEA_HYDRO", "SEA_HYDRO"), ("WGR_SEA_SMEAR", "SEA_SMEAR"), ("WGR_CLOUD_SHADE", "CLOUD_SHADE"), ("WGR_FOG_DITHER", "FOG_DITHER")] {
         if std::env::var(var).as_deref() != Ok("0") {
             defs.insert(def.to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
         }

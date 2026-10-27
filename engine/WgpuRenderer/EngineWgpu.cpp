@@ -22415,7 +22415,7 @@ void EngineWgpu::PushRenderParams()
         // overcast reads gloomier instead of being metered back to the same brightness (1 = all)
         nativeExposure ? nativeExposureCompensation
                        : 1.0f - 0.4f * EffectiveOvercastGloom(_sky.overcastGloom) * [] {
-                             const float t = std::clamp(((GLandscape ? GLandscape->GetOvercast() : 0.0f) - 0.6f) / 0.4f,
+                             const float t = std::clamp(((GLandscape ? GLandscape->GetOvercast() : 0.0f) - 0.4f) / 0.6f,
                                                         0.0f, 1.0f);
                              return t * t * (3.0f - 2.0f * t);
                          }(),

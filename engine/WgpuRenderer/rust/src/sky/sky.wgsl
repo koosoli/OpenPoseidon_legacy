@@ -1873,7 +1873,11 @@ fn march_clouds(
     // owner's Zeus slider "at one point the more overcast I do it becomes brighter again" (measured:
     // horizon 142 at 70%, 188 at 90%). Falls to 45% of the light at full overcast, monotonically,
     // scaled by OVERCAST-GLOOM (weather.z; off until the owner has seen it).
-    let deck_thick = 1.0 - 0.6 * clamp(sky.weather.z, 0.0, 1.0) * smoothstep(0.55, 0.9, cov);
+    // (2026-10-27, owner: "clouds are brighter if it is less overcast, the more overcast it gets the
+    // darker they will be") keyed on the WEATHER's coverage (cloud0.x), not this ray's local cover:
+    // the local value at the horizon samples sat outside the old 0.55-0.9 ramp, which left a bump
+    // between 70% and 80% overcast. From 40% overcast down to 30% of the light at full.
+    let deck_thick = 1.0 - 0.7 * clamp(sky.weather.z, 0.0, 1.0) * smoothstep(0.4, 1.0, sky.cloud0.x);
     res.inscatter = col * deck_thick * (1.0 - 0.78 * clamp(sky.weather.x, 0.0, 1.0));
     // The early-out above LEFT transmittance at the cut instead of driving it to zero, so a deck
     // that is opaque to the eye still passed ~1% of whatever was behind it. That is harmless for a
