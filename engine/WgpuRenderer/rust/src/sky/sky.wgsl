@@ -1879,6 +1879,14 @@ fn march_clouds(
     // between 70% and 80% overcast. From 40% overcast down to 30% of the light at full.
     let deck_thick = 1.0 - 0.7 * clamp(sky.weather.z, 0.0, 1.0) * smoothstep(0.4, 1.0, sky.cloud0.x);
     res.inscatter = col * deck_thick * (1.0 - 0.78 * clamp(sky.weather.x, 0.0, 1.0));
+    // (OP, CLOUD-HAZE; owner, 2026-10-27: "in your images, clouds in the distance look darker") the
+    // air between the eye and a far cloud scatters the sky's light into the view: a cumulus 10 km
+    // off reads paler and bluer, toward the horizon haze behind it, not as the dark underside it
+    // shows from below. The cloud's light is blended toward `bg` (this direction's sky radiance)
+    // over a 25 km air path from where the ray enters the cloud layer (t0: nothing added inside the
+    // march loop -- tracking the first cloudy sample there cost +0.07 ms of cloud march). Two ALU.
+    let air = 1.0 - exp(-t0 / 25000.0);
+    res.inscatter = mix(res.inscatter, bg * (1.0 - trans), air);
     // The early-out above LEFT transmittance at the cut instead of driving it to zero, so a deck
     // that is opaque to the eye still passed ~1% of whatever was behind it. That is harmless for a
     // background of ordinary radiance and catastrophic for the sun disc, whose radiance is the solar
@@ -2220,13 +2228,16 @@ fn cirrus_warp(world_xz: vec2<f32>, scale: f32) -> vec3<f32> {
 fn cirrus_field(world_xz: vec2<f32>, h: f32, cover: f32, warp: vec3<f32>, sh: CirrusShape) -> f32 {
     let s = sh.scale;
     let drift = sky.cloud4.z * s;
-    // (2026-10-27, CIRRUS-PATCHES, WGR_CIRRUS_PATCHES=1, off until the owner has seen it) a sparse
+    // (2026-10-27, CIRRUS-PATCHES, on by default at the owner's request; WGR_CIRRUS_PATCHES=0 = off) a sparse
     // layer (the owner's coverage 0.20) broke into cells of one size spread evenly over the sky, a
     // regular grid and rows toward the horizon. Gathering the coverage into patches (2026-10-26)
     // mostly deleted the layer. Instead the existing slow warp bends the lattice 2.5x harder when
     // the layer is sparse: some regions are squeezed and some stretched, so the cells come in
     // different sizes at uneven spacing and the amount of cloud is unchanged. No extra fetch.
-    let sparse = (1.0 - smoothstep(0.35, 0.75, cover)) * clamp(sky.weather.w, 0.0, 1.0);
+    // Sparse only (layer coverage below ~0.3, which the deck cap gives whenever the deck is light):
+    // at a half-overcast layer the harder warp left less empty sky between the cells and cost
+    // +0.07 ms of cloud march, and there the cells already merge into banks.
+    let sparse = (1.0 - smoothstep(0.1, 0.3, cover)) * clamp(sky.weather.w, 0.0, 1.0);
     let p = world_xz + warp.xy * (1.0 + 1.5 * sparse);
     // Slice drift (4). The two weights are irrational multiples of each other so the x and z
     // contributions do not come back into phase either. `h` walks the same axis, which is what
@@ -2316,7 +2327,10 @@ fn cirrus_layer(pos: vec3<f32>, dir: vec3<f32>, sun: vec3<f32>, radiance: f32, b
     // Puffiness/amount/match resolved ONCE for this pixel — the march below reuses it for every
     // step. Hoisted above `cover` because the coverage threshold now comes out of it (AMOUNT).
     let sh = cirrus_shape();
-    let cover = sh.cover * smoothstep(0.02, 0.35, sky.cloud0.x);
+    // (2026-10-27, owner: "there is never more upper layer clouds than lower layer clouds") capped
+    // below the deck's own coverage, so the overcast slider raises this layer more slowly than the
+    // deck and the deck partly hides it
+    let cover = min(sh.cover * smoothstep(0.02, 0.35, sky.cloud0.x), 0.8 * sky.cloud0.x);
     let cos_t = dot(dir, sun);
     // Ice: a strong forward lobe (the halo/silver look) over an isotropic floor. Thin enough that
     // self-shadowing is not worth a light march, so no sun-transmittance term through the sheet.

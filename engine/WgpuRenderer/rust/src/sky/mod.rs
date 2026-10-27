@@ -1118,11 +1118,11 @@ fn cirrus_look_from_env() -> Option<(f32, f32)> {
     Some(v)
 }
 
-/// CIRRUS-PATCHES (`WGR_CIRRUS_PATCHES=1`, off until the owner has seen it): a sparse second layer
-/// gathers into ~10 km patches instead of an even grid of puffs (sky.wgsl cirrus_field).
+/// CIRRUS-PATCHES (on by default since 2026-10-27; `WGR_CIRRUS_PATCHES=0` = off): a sparse second
+/// layer's lattice is warped harder, so its cells vary instead of forming an even grid (sky.wgsl cirrus_field).
 fn cirrus_patches_enabled() -> f32 {
     static V: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
-    *V.get_or_init(|| if std::env::var("WGR_CIRRUS_PATCHES").as_deref() == Ok("1") { 1.0 } else { 0.0 })
+    *V.get_or_init(|| if std::env::var("WGR_CIRRUS_PATCHES").as_deref() == Ok("0") { 0.0 } else { 1.0 })
 }
 
 /// `WGR_CIRRUS_SOFT=<0..1>` — startup override for the second layer's edge softness, for the same
@@ -3791,7 +3791,7 @@ mod cirrus_puffiness_tests {
             // AMOUNT: the coverage threshold the field remaps against, and its density coupling.
             "sh.cover = cirrus_mix3(CIRRUS_COVER_SPARSE, CIRRUS_COVER, CIRRUS_COVER_FULL, amount)",
             "CIRRUS_AMOUNT_DENSITY_SPARSE",
-            "let cover = sh.cover * smoothstep(0.02, 0.35, sky.cloud0.x);",
+            "let cover = min(sh.cover * smoothstep(0.02, 0.35, sky.cloud0.x), 0.8 * sky.cloud0.x);",
             // MATCH: altitude, feature scale, isotropy, striation, depth, opacity, step count.
             "sh.alt = mix(CIRRUS_ALT, matched_alt, m);",
             "sh.scale = mix(CIRRUS_SCALE,",
