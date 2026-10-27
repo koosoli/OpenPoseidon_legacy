@@ -2220,7 +2220,14 @@ fn cirrus_warp(world_xz: vec2<f32>, scale: f32) -> vec3<f32> {
 fn cirrus_field(world_xz: vec2<f32>, h: f32, cover: f32, warp: vec3<f32>, sh: CirrusShape) -> f32 {
     let s = sh.scale;
     let drift = sky.cloud4.z * s;
-    let p = world_xz + warp.xy;
+    // (2026-10-27, CIRRUS-PATCHES, WGR_CIRRUS_PATCHES=1, off until the owner has seen it) a sparse
+    // layer (the owner's coverage 0.20) broke into cells of one size spread evenly over the sky, a
+    // regular grid and rows toward the horizon. Gathering the coverage into patches (2026-10-26)
+    // mostly deleted the layer. Instead the existing slow warp bends the lattice 2.5x harder when
+    // the layer is sparse: some regions are squeezed and some stretched, so the cells come in
+    // different sizes at uneven spacing and the amount of cloud is unchanged. No extra fetch.
+    let sparse = (1.0 - smoothstep(0.35, 0.75, cover)) * clamp(sky.weather.w, 0.0, 1.0);
+    let p = world_xz + warp.xy * (1.0 + 1.5 * sparse);
     // Slice drift (4). The two weights are irrational multiples of each other so the x and z
     // contributions do not come back into phase either. `h` walks the same axis, which is what
     // gives the marched shell genuine vertical structure.
@@ -2246,14 +2253,7 @@ fn cirrus_field(world_xz: vec2<f32>, h: f32, cover: f32, warp: vec3<f32>, sh: Ci
     let wa = 1.0 - wb;
     let mixed = a * wa + b * wb;
     let sheet = clamp(0.5 + (mixed - 0.5) * inverseSqrt(wa * wa + wb * wb), 0.0, 1.0);
-    // (2026-10-26) PATCHES. A sparse layer (the owner's coverage 0.20) broke into small cells of one
-    // size spread evenly over the whole sky, which read as a regular grid of puffs, rows toward the
-    // horizon. Real cirrocumulus comes in fields: the coverage is gathered into patches ~10 km
-    // across with clear sky between them, by the warp tap's third channel, strongest when sparse
-    // and gone by a closing layer (the mean coverage stays about where it was).
-    let patchy = (1.0 - smoothstep(0.35, 0.75, cover)) * clamp(sky.weather.w, 0.0, 1.0);
-    let cov_l = clamp(mix(cover, cover * mix(0.55, 1.45, warp.z), patchy), 0.0, 1.0);
-    var d0 = clamp((sheet - (1.0 - cov_l)) / max(cov_l, 1e-3), 0.0, 1.0);
+    var d0 = clamp((sheet - (1.0 - cover)) / max(cover, 1e-3), 0.0, 1.0);
     if (d0 <= 0.0) {
         return 0.0; // in a gap -> skip the fibre tap (the empty-space fast path, as the deck does)
     }
